@@ -3,12 +3,14 @@ from scipy.spatial.transform import Rotation as R
 from controllers import uncontrolled
 from typing import Callable
 
+from kinematics import orc_to_eci
+
 G = 6.67430e-11 # universal gravitational constant
 M = 5.972e24 # mass of earth
 MU = G*M # gravitational parameter
 
 class CubeSat:
-    def __init__(self, keplar_elements: KeplarElements, initial_attitude: R, initial_ang_vel_B: np.ndarray|None=None):
+    def __init__(self, keplar_elements: "KeplarElements", initial_attitude: R, initial_ang_vel_B: np.ndarray|None=None):
         """
         Initialize the Satellites dynamics parameters and state.
 
@@ -26,6 +28,9 @@ class CubeSat:
         """
         self.m = 0.1
         self.J_body = np.diag([1., 1., 1.]) # moment of inertia in body frame
+        self.reaction_wheels: list[ReactionWheel] = []
+
+        self.attitude_dynamics = AttitudeDynamics(self, self.reaction_wheels)
 
         self.body_shape = ... # TODO: define shape
 
@@ -72,7 +77,7 @@ class CubeSat:
         d_state[0:3] = r_dot
         d_state[3:6] = orbit_dynamics(self.m, r, ctrl_force, dist_force)
         d_state[6:10] = q_dot
-        d_state[10:13] = attitude_dynamics(omega, self.J_body, ctrl_torque, dist_torque)
+        d_state[10:13] = self.attitude_dynamics(omega, self.J_body, ctrl_torque, dist_torque)
 
         return d_state
     
@@ -90,60 +95,6 @@ class CubeSat:
         return next_state
 
 
-    def sun_facing_area(self) -> None:
-        pass
-
-    def  air_facing_area(self) -> None:
-        pass
-
-def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
-    """
-    Calculates the rotation from the Orbital Reference Frame (ORC) to the Earth-Centered Inertial (ECI) frame.
-
-    Parameters
-    ----------
-    r : np.ndarray, shape (3,)
-        Position vector in the ECI frame [m].
-    v : np.ndarray, shape (3,)
-        Velocity vector in the ECI frame [m/s].
-
-    Returns
-    -------
-    R_IO : scipy.spatial.transform.Rotation
-        Rotation object representing the transformation from ORC to ECI.
-   
-    """
-    o_3I = - r / np.linalg.norm(r)
-    o_2I = np.cross(v, o_3I) / np.linalg.norm(v)
-    o_1I = np.cross(o_2I, o_3I)
-    R_IO = R.from_matrix(np.array([o_1I, o_2I, o_3I]))
-    return R_IO
-    
-
-def quaternion_kinematics(q: np.ndarray, omega: np.ndarray) -> np.ndarray:
-    """
-    Compute the derivative of the quaternion.
-
-    Parameters
-    ----------
-    q : np.ndarray, shape (4,)
-        Current attitude quaternion [qx, qy, qz, qw].
-    omega : np.ndarray, shape (3,)
-        Angular velocity in the body frame [wx, wy, wz] [rad/s].
-
-    Returns
-    -------
-    np.ndarray, shape (4,)
-        The time derivative of the quaternion (dq/dt).
-    """
-    qx, qy, qz, qw = q
-    wx, wy, wz = omega
-    return 0.5 * np.array([
-        -qx*wx - qy*wy - qz*wz,
-         qw*wx + qy*wz - qz*wy,
-         qw*wy - qx*wz + qz*wx,
-         qw*wz + qx*wy - qy*wx
-    ]) 
 
 def orbit_dynamics(m: float, r: np.ndarray, ctrl_force: np.ndarray, dist_force: np.ndarray) -> np.ndarray:
     """
@@ -170,7 +121,44 @@ def orbit_dynamics(m: float, r: np.ndarray, ctrl_force: np.ndarray, dist_force: 
     d_v = - (MU/r_norm**3) * r + (ctrl_force + dist_force)/m
     return d_v
 
-def attitude_dynamics(omega: np.ndarray, J: np.ndarray, ctrl_torque: np.ndarray, dist_torque: np.ndarray) -> np.ndarray:
+class AttitudeDynamics:
+    def __init__(self, sc: CubeSat, rws: list[ReactionWheel]):
+        self.J_B = sc.J_body
+        self.J_w = sum([rws[i].inertia * rws[i].spin_axis @ rws[i].spin_axis.T 
+                       for i in range(len(rws))])
+        
+        self.J_tilde = self.J_B + self.J_w
+
+
+    def __call__(self, omega: np.ndarray, h_int: np.ndarray, ctrl_torque: np.ndarray, dist_torque: np.ndarray) -> np.ndarray:
+        """
+        Compute the spacecrafts angular acceleration (omega_dot) 
+        from Euler's rotational dynamics inclduing the effects of internal angular momentum from e.g. reaction wheels.
+        
+        Parameters
+        ----------  
+        omega : ndarray, shape (3,)
+            Angular velocity in body frame [wx, wy, wz].
+
+        h_int: ndarray, shape (3,)
+            Internal angular momentum vector from reaction wheels.
+        ctrl_torque : ndarray, shape (3,)
+            Control torque vector in body frame.
+        dist_torque : ndarray, shape (3,)
+            Disturbance torque vector in body frame.
+
+        Returns
+        -------
+        omega_dot : ndarray, shape (3,)
+            Angular acceleration in body frame.
+        """
+        cross_term = np.cross(omega, self.J_B @ omega + h_int)
+        total_torque = ctrl_torque + dist_torque - cross_term
+        omega_dot = np.linalg.solve(self.J_tilde, total_torque) # TODO: faster solving by precomputing stuff because J is constant
+        return omega_dot 
+
+
+def attitude_dynamics(omega: np.ndarray, J: np.ndarray, J_w: float, h_int: np.ndarray, ctrl_torque: np.ndarray, dist_torque: np.ndarray) -> np.ndarray:
     """
     Compute angular acceleration (omega_dot) from Euler's rotational dynamics.
     
@@ -180,6 +168,10 @@ def attitude_dynamics(omega: np.ndarray, J: np.ndarray, ctrl_torque: np.ndarray,
         Angular velocity in body frame [wx, wy, wz].
     J : ndarray, shape (3,3)
         Inertia matrix in body frame.
+    J_w : float
+        Rotational inertia of the reaction wheels.
+    h_int: ndarray, shape (3,)
+        Internal angular momentum from reaction wheels.
     ctrl_torque : ndarray, shape (3,)
         Control torque vector in body frame.
     dist_torque : ndarray, shape (3,)
@@ -190,9 +182,9 @@ def attitude_dynamics(omega: np.ndarray, J: np.ndarray, ctrl_torque: np.ndarray,
     omega_dot : ndarray, shape (3,)
         Angular acceleration in body frame.
     """
-    cross_term = np.cross(omega, J @ omega)
+    cross_term = np.cross(omega, J_tilde @ omega)
     total_torque = ctrl_torque + dist_torque - cross_term
-    omega_dot = np.linalg.solve(J, total_torque) # TODO: faster solving by precomputing stuff because J is constant
+    omega_dot = np.linalg.solve(J_tilde, total_torque) # TODO: faster solving by precomputing stuff because J is constant
     return omega_dot 
 
 def rk4_step(f: Callable[[np.ndarray, np.ndarray], np.ndarray], x: np.ndarray, u: np.ndarray, dt: float) -> np.ndarray:
@@ -246,6 +238,8 @@ class KeplarElements:
         self.arg_pe = arg_pe
         self.M0 = M0
         self.t0 = t0
+
+        # TODO: take a look at TLE and to what inertial frame these elements actually transform 
 
     def mean_motion(self) -> float:
         """

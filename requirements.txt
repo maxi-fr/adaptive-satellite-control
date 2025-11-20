@@ -2,3 +2,7 @@ numpy
 pandas
 matplotlib
 casadi
+pymsis
+astropy
+scipy
+pyIGRF
