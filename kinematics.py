@@ -2,10 +2,9 @@ from scipy.spatial.transform import Rotation as R
 import numpy as np
 
 from astropy.time import Time
-from astropy.coordinates import GCRS, ITRS, CartesianRepresentation, EarthLocation
+from astropy.coordinates import EarthLocation
 import astropy.units as u
 import numpy as np
-
 
 
 def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
@@ -23,7 +22,7 @@ def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
     -------
     R_IO : scipy.spatial.transform.Rotation
         Rotation object representing the transformation from ORC to ECI.
-   
+
     """
     o_3I = - r / np.linalg.norm(r)
     o_2I = np.cross(v, o_3I) / np.linalg.norm(v)
@@ -37,6 +36,7 @@ def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
 
 #     return R_BO
 
+
 def orc_to_sbc(q_BI: np.ndarray, r_eci: np.ndarray, v_eci: np.ndarray) -> R:
     """
     Calculates rotation from ORC to SBC using the attitude quaternion as well as position and velocity vectors.
@@ -47,7 +47,7 @@ def orc_to_sbc(q_BI: np.ndarray, r_eci: np.ndarray, v_eci: np.ndarray) -> R:
     Parameters
     ----------
     q_BI : np.ndarray, shape (4,)
-        Attitude quaternion [w, x, y, z] for the rotation from ECI (I) to the body frame (B).
+        Attitude quaternion [qx, qy, qz, qw] for the rotation from ECI (I) to the body frame (B).
     r_eci : np.ndarray, shape (3,)
         Position vector in the ECI frame.
     v_eci : np.ndarray, shape (3,)
@@ -59,44 +59,54 @@ def orc_to_sbc(q_BI: np.ndarray, r_eci: np.ndarray, v_eci: np.ndarray) -> R:
             Rotation object representing the transformation from ORC to SBC.
     """
 
-    R_BO = R.from_quat(q_BI, scalar_first=True) * orc_to_eci(r_eci, v_eci)
+    R_BO = R.from_quat(q_BI, scalar_first=False) * orc_to_eci(r_eci, v_eci)
 
     return R_BO
 
 
-
 def eci_to_sbc(q_BI: np.ndarray) -> R:
 
-    return R.from_quat(q_BI, scalar_first=True)
+    return R.from_quat(q_BI, scalar_first=False)
 
-
-
-
-
-
-
-
-def quaternion_kinematics(q: np.ndarray, omega: np.ndarray) -> np.ndarray:
+def eci_to_geodedic(pos_eci: np.ndarray) -> tuple[float, float, float]:
     """
-    Compute the derivative of the quaternion.
+    pos_eci [x, y, z] in meters, 
+    return deg, deg, m
+    
+    """
+    
+    loc = EarthLocation.from_geocentric(*(pos_eci*u.m)).to_geodetic("WGS84") # type: ignore
 
+    lat = loc.lat.value
+    lon = loc.lon.value
+    alt = loc.height.to(u.m).value # type: ignore
+
+    return lat, lon, alt
+
+
+
+def quaternion_kinematics(q_BI: np.ndarray, omega: np.ndarray) -> np.ndarray:
+    """
+    Compute the derivative of the quaternion. Using the scalar last convention: q_BI = [qx, qy, qz, qw]
+    
     Parameters
     ----------
-    q : np.ndarray, shape (4,)
+    q_BI : np.ndarray, shape (4,)
         Current attitude quaternion [qx, qy, qz, qw].
     omega : np.ndarray, shape (3,)
-        Angular velocity in the body frame [wx, wy, wz] [rad/s].
+        Angular velocity of the body frame with respect to the inertial frame 
+        represented in the body frame [wx, wy, wz] [rad/s].
 
     Returns
     -------
     np.ndarray, shape (4,)
         The time derivative of the quaternion (dq/dt).
     """
-    qx, qy, qz, qw = q
+    qx, qy, qz, qw = q_BI
     wx, wy, wz = omega
     return 0.5 * np.array([
         -qx*wx - qy*wy - qz*wz,
-         qw*wx + qy*wz - qz*wy,
-         qw*wy - qx*wz + qz*wx,
-         qw*wz + qx*wy - qy*wx
-    ]) 
+        qw*wx + qy*wz - qz*wy,
+        qw*wy - qx*wz + qz*wx,
+        qw*wz + qx*wy - qy*wx
+    ])
