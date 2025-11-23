@@ -2,6 +2,7 @@
 
 from typing import List
 import numpy as np
+from actuators import Magnetorquer, ReactionWheel
 from dynamics import orbit_dynamics, attitude_dynamics
 
 
@@ -11,9 +12,9 @@ but they do not contain the state. The state is managed externally.
 (TODO: maybe doesnt have to be a wrapper, they can just implement the dynamics) 
 """
 
-class CubeSat:
+class Spacecraft:
 
-    def __init__(self, m, J_B, surfaces: list["Surface"], sensors, rws: list["ReactionWheel"], magnetorquers: list["Magnetorquer"]) -> None:
+    def __init__(self, m, J_B, surfaces: list["Surface"], sensors, rws: list[ReactionWheel], magnetorquers: list[Magnetorquer]) -> None:
         self.m = m
         self.J_B = J_B
         self.sensors = sensors
@@ -39,41 +40,6 @@ class CubeSat:
     def attitude_dynamics(self, omega: np.ndarray, h_int: np.ndarray, ctrl_torque: np.ndarray, dist_torque: np.ndarray):
 
         return attitude_dynamics(omega, self.J_B, ctrl_torque, dist_torque, self.J_tilde, h_int)
-    
-
-class ReactionWheel:    
-    def __init__(self, max_torque: float, max_rpm: float, inertia: float, spin_axis: np.ndarray):
-        self.max_torque = max_torque
-        self.max_rpm = max_rpm
-        self.inertia = inertia
-        self.spin_axis = spin_axis
-
-
-    def torque_ang_momentum(self, i, omega_w) -> tuple[float, float]:
-        # TODO
-        h_wheel = self.inertia * omega_w * self.spin_axis
-        tau = self.K * i
-        return tau, h_wheel
-    
-    def dynamics(self):
-        # TODO
-        pass
-
-
-
-class Magnetorquer:
-    def __init__(self, max_moment: float, spin_axis: np.ndarray):
-        self.max_moment = max_moment
-        self.spin_axis = spin_axis
-
-    def torque(self, u: float) -> float:
-        # TODO
-        tau = 0
-        return tau
-    
-    def dynamics(self):
-        # TODO
-        pass
 
 
 class Surface:

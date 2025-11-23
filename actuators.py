@@ -1,11 +1,35 @@
 import numpy as np
 
-
-class ReactionWheel:
+class ReactionWheel:    
     def __init__(self, max_torque: float, max_rpm: float, inertia: float, spin_axis: np.ndarray):
         self.max_torque = max_torque
         self.max_rpm = max_rpm
         self.inertia = inertia
         self.spin_axis = spin_axis
-        self.current_rpm = 0.0
 
+
+    def torque_ang_momentum(self, i, omega_w) -> tuple[float, float]:
+        # TODO
+        h_wheel = self.inertia * omega_w * self.spin_axis
+        tau = self.K_t * i
+        return tau, h_wheel
+    
+    def dynamics(self):
+        # TODO
+        pass
+
+
+
+class Magnetorquer:
+    def __init__(self, max_moment: float, spin_axis: np.ndarray):
+        self.max_moment = max_moment
+        self.spin_axis = spin_axis
+
+    def torque(self, i, B) -> float:
+        # TODO
+        tau = 0
+        return tau
+    
+    def dynamics(self):
+        # TODO
+        pass

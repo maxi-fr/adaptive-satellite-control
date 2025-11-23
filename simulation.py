@@ -8,11 +8,11 @@ from dynamics import KeplarElements, attitude_dynamics, orbit_dynamics
 import environment as env
 import disturbances as dis
 from kinematics import orc_to_eci, quaternion_kinematics, eci_to_geodedic
-from satellite import CubeSat
+from satellite import Spacecraft
 
 
 class Simulation:
-    def __init__(self, sat: CubeSat, keplar_elements: KeplarElements, initial_attitude: R, initial_ang_vel_B: np.ndarray, log_file: str,
+    def __init__(self, sat: Spacecraft, keplar_elements: KeplarElements, initial_attitude: R, initial_ang_vel_B: np.ndarray, log_file: str,
                  dt: datetime.timedelta, t0: datetime.datetime, tf: datetime.datetime):
 
         self.t0 = t0
@@ -46,35 +46,19 @@ class Simulation:
     def run(self):
         state = self.inital_state
         t = self.t0
+        u = np.zeros(6)
+
         while t < self.tf:
-
-            # current state
-            r_eci = state[0:3]
-            v_eci = state[3:6]
-            q_BI = state[6:10]
-            omega = state[10:13]
-            omega_w = state[13:]
-            rws_curr = state[16:19]
-            mag_curr = state[19:22]
-
-
-            # kinematics
-            lat, lon, alt = eci_to_geodedic(r_eci)
-
-            rho = env.atmosphere_density_msis(t, lat, lon, alt)
-            B = env.magnetic_field_vector(t, lat, lon, alt)
-            sun_pos = env.sun_position(t)
-            in_shadow = env.is_in_shadow(r_eci, sun_pos)
-            moon_pos = env.moon_position(t)
-
-            F_third = dis.third_body_forces(r_eci, self.sat.m, sun_pos, moon_pos)
-            tau_gg = dis.gravity_gradient(r_eci, v_eci, q_BI, self.sat.J_B)
-            F_aero, tau_aero = dis.aerodynamic_drag(r_eci, v_eci, q_BI, self.sat.surfaces, rho)
-            F_SRP, tau_SRP = dis.solar_radiation_pressure(r_eci, sun_pos, in_shadow, q_BI, self.sat.surfaces)
-
+            
+            # Flight software (FSW)
             # TODO: sensors 
-            sun_pos_mea = sun_pos
-
+            k1 = self.world_dynamics(state, u, t, update_sensors=True)
+            sun_pos_mea = self.sat.sun_sensor.read()
+            moon_pos_mea = self.sat.moon_sensor.read()
+            self.sat.magnetometer.read()
+            self.sat.gps.read()
+            self.sat.imu.read()
+            
             # TODO: estimators
             sun_pos_est = sun_pos_mea
             state_est = state
@@ -83,33 +67,19 @@ class Simulation:
             u_rw = np.zeros(3)
             u_mag = np.zeros(3)
             
-
-            # TODO: actuators
-            tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_w[i])) for i, rw in enumerate(self.sat.rws)])
-            tau_mag = sum([np.array(mag.torque(mag_curr[i])) for i, mag in enumerate(self.sat.mag)])
-
             # logging
             with open(self.log_file, 'a') as f:
                 writer = csv.writer(f)
                 writer.writerow([t] + list(state))
-
-
-            # TODO: theoretically world and computer (estimator and controller) dynamics dont have to be seperate, 
-            # the estimator and controller models should then be implemented with proper discretization (sample and hold) functionality
-            # would save on doubly computing environment functions (inside of Simulation.run() and Simulation.world_dynamics()
-            # Same idea for sensors which might only receive data every x timesteps
  
             # integrate world dynamics (envrionment, orbit, attitude, sensors, actuators)
             u = np.vstack((u_rw, u_mag))
-            next_state = rk4_step(self.world_dynamics, state, u, t, self.dt)
-
-            # integrate internal dynamics of estimators and controllers (if they have dynamics)
-            ...
+            next_state = rk4_step(self.world_dynamics, state, u, t, self.dt, k1)
 
             t += self.dt
             state = next_state
 
-    def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime):
+    def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime, update_sensors: bool = False):
         """
         Helper function to wrap dynamics for whole system for runge-kutta integration.
 
@@ -129,9 +99,12 @@ class Simulation:
         v_eci = x[3:6]
         q_BI = x[6:10]
         omega = x[10:13]
-        omega_rws = x[13:]
+        omega_rws = x[13:16]
         rws_curr = x[16:19]
         mag_curr = x[19:22]
+        
+        u_mag = u[:3]
+        u_rw = u[3:6]
 
         lat, lon, alt = eci_to_geodedic(r_eci)
 
@@ -147,11 +120,8 @@ class Simulation:
         F_aero, tau_aero = dis.aerodynamic_drag(r_eci, v_eci, q_BI, self.sat.surfaces, rho)
         F_SRP, tau_SRP = dis.solar_radiation_pressure(r_eci, sun_pos, in_shadow, q_BI, self.sat.surfaces)
 
-        u_mag = u[:3]
-        u_rw = u[3:6]
-
         tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i])) for i, rw in enumerate(self.sat.rws)])
-        tau_mag = sum([np.array(mag.torque(mag_curr[i])) for i, mag in enumerate(self.sat.mag)])
+        tau_mag = sum([np.array(mag.torque(mag_curr[i], B)) for i, mag in enumerate(self.sat.mag)])
 
         # differential equations
         d_r = v_eci
@@ -162,11 +132,20 @@ class Simulation:
         d_curr_mag = [mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)] 
 
         dx = np.vstack((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
+
+        # sensors
+        if update_sensors:
+            self.sat.sun_sensor.measure(t, sun_pos)
+            self.sat.moon_sensor.measure(t, moon_pos)
+            self.sat.magnetometer.measure(t, B)
+            self.sat.gps.measure(t, r_eci)
+            self.sat.imu.measure(t, d_v, d_omega)
+
         return dx
 
 
 def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray], 
-             x: np.ndarray, u: np.ndarray, t: datetime.datetime, dt: datetime.timedelta) -> np.ndarray:
+             x: np.ndarray, u: np.ndarray, t: datetime.datetime, dt: datetime.timedelta, k1: np.ndarray|None = None) -> np.ndarray:
     """
     Classic 4th-order Runge-Kutta integrator.
 
@@ -182,9 +161,20 @@ def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray
         Current simulation time.
     dt : float
         Time step.
+    k1 : np.ndarray|None
+        First grid point at current time. If none then it is computed from f.
+
+    Returns
+    -------
+    np.ndarray
+        State after one time step.
     """
+
     dt_float = dt.total_seconds()
-    k1 = f(x, u, t)
+
+    if k1 is None:
+        k1 = f(x, u, t)
+
     k2 = f(x + 0.5 * dt_float * k1, u, t + 0.5 * dt)
     k3 = f(x + 0.5 * dt_float * k2, u, t + 0.5 * dt)
     k4 = f(x + dt * k3, u, t + dt)

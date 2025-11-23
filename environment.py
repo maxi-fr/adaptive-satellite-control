@@ -183,7 +183,7 @@ def solar_radiation_pressure_constant(r_eci: np.ndarray, sun_pos_eci: np.ndarray
 
     dist = np.asarray(sun_pos_eci) - np.asarray(r_eci)
 
-    return float(P_1AU * (AU_M / np.linalg.norm(dist))**2)
+    return float(P_1AU * (AU_M / np.linalg.norm(dist))**2) #FIXME: maybe wrong formula
 
 
 E_RADIUS_M = 6378137.0 # Earth's equatorial radius in meters
