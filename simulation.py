@@ -4,7 +4,7 @@ import csv
 from typing import Callable
 from scipy.spatial.transform import Rotation as R
 import numpy as np
-from dynamics import KeplarElements, attitude_dynamics, orbit_dynamics
+from dynamics import KeplarElements
 import environment as env
 import disturbances as dis
 from kinematics import orc_to_eci, quaternion_kinematics, eci_to_geodedic
@@ -81,18 +81,23 @@ class Simulation:
 
     def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime, update_sensors: bool = False):
         """
-        Helper function to wrap dynamics for whole system for runge-kutta integration.
+        Helper function to wrap dynamics for whole system for integration.
 
         Parameters
         ----------
-        x : np.ndarray, shape (16,)
+        x : np.ndarray, shape (22,)
             All variable states during integration
-
         u : np.ndarray, shape ()
             All control inputs during integration. They are constant during integration.
-
         t : datetime.datetime
             Current simulation time.
+        update_sensors : bool = False
+            Flag whether the sensor should be updates with new measurements. Default is False.
+
+        Returns
+        -------
+        np.ndarray, shape (22,)
+            State derivative dx/dt at time t.
         """
 
         r_eci = x[0:3]
@@ -129,7 +134,7 @@ class Simulation:
         d_q = quaternion_kinematics(q_BI, omega)
         d_omega = self.sat.attitude_dynamics(omega, h_rw, tau_mag - tau_rw, tau_gg + tau_aero + tau_SRP)
         d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i]) for i, rw in enumerate(self.sat.rws)])
-        d_curr_mag = [mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)] 
+        d_curr_mag = np.array([mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)]) 
 
         dx = np.vstack((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
 
