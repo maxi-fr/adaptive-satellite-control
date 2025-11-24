@@ -8,9 +8,9 @@ class ReactionWheel:
         self.spin_axis = spin_axis
 
 
-    def torque_ang_momentum(self, i, omega_w) -> tuple[float, float]:
+    def torque_ang_momentum(self, i, omega_w, omega) -> tuple[float, float]:
         # TODO
-        h_wheel = self.inertia * omega_w * self.spin_axis
+        h_wheel = (self.inertia * (omega_w + np.dot(self.spin_axis, omega))) * self.spin_axis  
         tau = self.K_t * i
         return tau, h_wheel
     

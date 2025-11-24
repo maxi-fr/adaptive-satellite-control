@@ -39,7 +39,7 @@ class Spacecraft:
 
     def attitude_dynamics(self, omega: np.ndarray, h_int: np.ndarray, ctrl_torque: np.ndarray, dist_torque: np.ndarray):
 
-        return attitude_dynamics(omega, self.J_B, ctrl_torque, dist_torque, self.J_tilde, h_int)
+        return attitude_dynamics(omega, self.J_tilde, ctrl_torque, dist_torque, h_int)
 
 
 class Surface:

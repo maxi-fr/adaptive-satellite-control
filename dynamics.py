@@ -32,7 +32,7 @@ def orbit_dynamics(m: float, r: np.ndarray, ctrl_force: np.ndarray, dist_force: 
 
 
 def attitude_dynamics(omega: np.ndarray, J_B: np.ndarray, ctrl_torque: np.ndarray,
-                      dist_torque: np.ndarray, J_tilde: np.ndarray | None = None, h_int: np.ndarray | None = None) -> np.ndarray:
+                      dist_torque: np.ndarray, h_int: np.ndarray | None = None) -> np.ndarray:
     """
     Compute the spacecrafts angular acceleration (omega_dot) 
     from Euler's rotational dynamics inclduing the effects of internal angular momentum from e.g. reaction wheels.
@@ -42,15 +42,13 @@ def attitude_dynamics(omega: np.ndarray, J_B: np.ndarray, ctrl_torque: np.ndarra
     omega : ndarray, shape (3,)
         Angular velocity in body frame [wx, wy, wz].
     J_B : ndarray, shape (3, 3)
-        Inertia tensor of the satellite in the body frame [kg*m^2].
+        Total inertia tensor of the satellite minus the contribution of the reaction wheels spin axis inertia in the body frame [kg*m^2].
     ctrl_torque : ndarray, shape (3,)
         Control torque vector in body frame.
     dist_torque : ndarray, shape (3,)
         Disturbance torque vector in body frame.
-    J_tilde : ndarray, shape (3, 3)
-        Total inertia tensor of the satellite minus the contribution of the reaction wheels spinning inertia in the body frame [kg*m^2].
-    h_int: ndarray, shape (3,)
-        Internal angular momentum vector from reaction wheels.
+    h_int: ndarray|None, shape (3,)
+        Internal angular momentum vector from reaction wheels. Default is None.
 
     Returns
     -------
@@ -60,12 +58,10 @@ def attitude_dynamics(omega: np.ndarray, J_B: np.ndarray, ctrl_torque: np.ndarra
 
     if h_int is None:
         h_int = np.zeros(3)
-    if J_tilde is None:
-        J_tilde = J_B
 
     cross_term = np.cross(omega, J_B @ omega + h_int)
     total_torque = ctrl_torque + dist_torque - cross_term
-    omega_dot = np.linalg.solve(J_tilde, total_torque)  # TODO: faster solving by precomputing stuff because J is constant
+    omega_dot = np.linalg.solve(J_B, total_torque)  # TODO: faster solving by precomputing stuff because J is constant
     return omega_dot
 
 

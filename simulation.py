@@ -49,10 +49,11 @@ class Simulation:
         u = np.zeros(6)
 
         while t < self.tf:
+
+            k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor get get current measurements. k1 is passed to integration step, to avoid recomputing 
             
             # Flight software (FSW)
             # TODO: sensors 
-            k1 = self.world_dynamics(state, u, t, update_sensors=True)
             sun_pos_mea = self.sat.sun_sensor.read()
             moon_pos_mea = self.sat.moon_sensor.read()
             self.sat.magnetometer.read()
@@ -67,7 +68,9 @@ class Simulation:
             u_rw = np.zeros(3)
             u_mag = np.zeros(3)
             
-            # logging
+            # logging 
+            # TODO: maybe log to different files. 
+            # Because it could get alot with all different variables: states, measured states, estimated states, environment variables
             with open(self.log_file, 'a') as f:
                 writer = csv.writer(f)
                 writer.writerow([t] + list(state))
@@ -87,7 +90,7 @@ class Simulation:
         ----------
         x : np.ndarray, shape (22,)
             All variable states during integration
-        u : np.ndarray, shape ()
+        u : np.ndarray, shape (6,)
             All control inputs during integration. They are constant during integration.
         t : datetime.datetime
             Current simulation time.
@@ -125,7 +128,7 @@ class Simulation:
         F_aero, tau_aero = dis.aerodynamic_drag(r_eci, v_eci, q_BI, self.sat.surfaces, rho)
         F_SRP, tau_SRP = dis.solar_radiation_pressure(r_eci, sun_pos, in_shadow, q_BI, self.sat.surfaces)
 
-        tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i])) for i, rw in enumerate(self.sat.rws)])
+        tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega)) for i, rw in enumerate(self.sat.rws)])
         tau_mag = sum([np.array(mag.torque(mag_curr[i], B)) for i, mag in enumerate(self.sat.mag)])
 
         # differential equations
@@ -148,7 +151,7 @@ class Simulation:
 
         return dx
 
-
+# TODO: maybe implement a variable step size integrator. RK45
 def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray], 
              x: np.ndarray, u: np.ndarray, t: datetime.datetime, dt: datetime.timedelta, k1: np.ndarray|None = None) -> np.ndarray:
     """
@@ -166,8 +169,8 @@ def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray
         Current simulation time.
     dt : float
         Time step.
-    k1 : np.ndarray|None
-        First grid point at current time. If none then it is computed from f.
+    k1 : np.ndarray|None = None
+        First grid point at current time. If None then it is computed from f.
 
     Returns
     -------
