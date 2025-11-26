@@ -5,6 +5,7 @@ from astropy.time import Time
 from astropy.coordinates import EarthLocation
 import astropy.units as u
 import numpy as np
+import casadi as ca
 
 
 def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:

@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import casadi as ca
 
 G = 6.67430e-11  # universal gravitational constant
 M = 5.972e24  # mass of earth

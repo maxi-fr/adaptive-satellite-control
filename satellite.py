@@ -4,6 +4,8 @@ from typing import List
 import numpy as np
 from actuators import Magnetorquer, ReactionWheel
 from dynamics import orbit_dynamics, attitude_dynamics
+from sensors import SunSensor, Magnetometer, GPS, Accelerometer, Gyroscope, RW_tachometer
+
 
 
 """
@@ -14,10 +16,19 @@ but they do not contain the state. The state is managed externally.
 
 class Spacecraft:
 
-    def __init__(self, m, J_B, surfaces: list["Surface"], sensors, rws: list[ReactionWheel], magnetorquers: list[Magnetorquer]) -> None:
+    def __init__(self, m, J_B, surfaces: list["Surface"], rws: list[ReactionWheel], magnetorquers: list[Magnetorquer],
+                 sun_sensor: SunSensor, magnetometer: Magnetometer, gps: GPS, accelerometer: Accelerometer, gyro: Gyroscope,
+                 rw_speed_sensors: list[RW_tachometer]) -> None:
         self.m = m
         self.J_B = J_B
-        self.sensors = sensors
+
+        self.sun_sensor = sun_sensor
+        self.magnetometer = magnetometer
+        self.gps = gps
+        self.accelerometer = accelerometer
+        self.gyro = gyro
+        self.rw_speed_sensors = rw_speed_sensors
+
         self.rws = rws
         self.mag = magnetorquers
 

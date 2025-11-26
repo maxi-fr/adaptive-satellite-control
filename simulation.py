@@ -7,7 +7,7 @@ import numpy as np
 from dynamics import KeplarElements
 import environment as env
 import disturbances as dis
-from kinematics import orc_to_eci, quaternion_kinematics, eci_to_geodedic
+from kinematics import orc_to_eci, orc_to_sbc, quaternion_kinematics, eci_to_geodedic
 from satellite import Spacecraft
 
 
@@ -50,18 +50,18 @@ class Simulation:
 
         while t < self.tf:
 
-            k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor get get current measurements. k1 is passed to integration step, to avoid recomputing 
+            k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor get get current measurements. k1 is passed to integration step, to avoid recomputation 
             
             # Flight software (FSW)
-            # TODO: sensors 
-            sun_pos_mea = self.sat.sun_sensor.read()
-            moon_pos_mea = self.sat.moon_sensor.read()
-            self.sat.magnetometer.read()
-            self.sat.gps.read()
-            self.sat.imu.read()
-            
+            sun_mea = self.sat.sun_sensor.read(t)
+            mag_mea =self.sat.magnetometer.read(t)
+            gps_mea = self.sat.gps.read(t)
+            acc_mea = self.sat.accelerometer.read(t)
+            gyro_mea = self.sat.gyro.read(t)
+            omega_rw_mea = [rw.read(t) for rw in self.sat.rw_speed_sensors]
+
             # TODO: estimators
-            sun_pos_est = sun_pos_mea
+            sun_pos_est = sun_mea
             state_est = state
 
             # TODO: controllers
@@ -141,13 +141,14 @@ class Simulation:
 
         dx = np.vstack((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
 
-        # sensors
         if update_sensors:
             self.sat.sun_sensor.measure(t, sun_pos)
-            self.sat.moon_sensor.measure(t, moon_pos)
             self.sat.magnetometer.measure(t, B)
             self.sat.gps.measure(t, r_eci)
-            self.sat.imu.measure(t, d_v, d_omega)
+            self.sat.accelerometer.measure(t, d_v, orc_to_sbc(q_BI, r_eci, v_eci))
+            self.sat.gyro.measure(t, omega)
+            for i, rw in enumerate(self.sat.rw_speed_sensors):
+                rw.measure(t, omega_rws[i])
 
         return dx
 

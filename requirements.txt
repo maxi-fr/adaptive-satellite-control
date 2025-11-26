@@ -6,3 +6,6 @@ pymsis
 astropy
 scipy
 pyIGRF
+filterpy
+ipykernel
+ipython
