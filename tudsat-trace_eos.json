@@ -1,0 +1,557 @@
+{
+  "$type": "Eos.SimulationFramework.ScenarioFile, SimulationLibrary",
+  "Settings": {
+    "$type": "Eos.SimulationFramework.SimulationSettings, SimulationLibrary",
+    "SimulationStart": "2024-01-01T12:00:00",
+    "SimulationDuration": "02:00:00",
+    "SimulationEnd": "2024-01-01T14:00:00",
+    "SimulationPeriod": "00:00:00.2000000",
+    "SamplePeriod": "00:00:00.2000000",
+    "RunForever": true,
+    "RealTime": false,
+    "SamplePeriodMultiplier": 1
+  },
+  "ModelObjects": {
+    "$type": "Eos.SimulationFramework.ScenarioModelObjectDictionary, SimulationLibrary",
+    "Simulation Model": {
+      "$type": "Eos.Models.Satellite.SatelliteSimulation, SatelliteLibrary"
+    },
+    "Environment": {
+      "$type": "Eos.Models.Satellite.EarthOrbitingSatelliteEnvironment, SatelliteLibrary"
+    },
+    "Sun Model": {
+      "$type": "Eos.Models.Satellite.EciSunModel, SatelliteLibrary"
+    },
+    "Moon Model": {
+      "$type": "Eos.Models.Satellite.EciMoonModel, SatelliteLibrary"
+    },
+    "Magnetic Field Model": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeAcpIgrfModel, CubeSpaceEosLibrary"
+    },
+    "Atmosphere Model": {
+      "$type": "Eos.Models.Satellite.Nrlmsise00AtmosphereModel, SatelliteLibrary"
+    },
+    "Solar and Geo Index Provider 1": {
+      "$type": "Eos.Models.Satellite.SolarAndGeomagneticIndexProvider, SatelliteLibrary",
+      "SolarFluxAndMagneticIndexMode": 1,
+      "ConstantSolarFlux": 150.0,
+      "ConstantApIndex": 4.0
+    },
+    "TRACE": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CubeSat2UModel, CubeSatLibrary",
+      "NominalAlignment": 2,
+      "IncludeAeroDisturbance": true,
+      "IncludeSolarDisturbance": true,
+      "StructureSurfaceModel": {
+        "$type": "Eos.Models.Satellite.SurfaceModel, SatelliteLibrary",
+        "SurfaceSegments": {
+          "$type": "System.Collections.Generic.List`1[[Eos.Models.Satellite.SurfaceSegment, SatelliteLibrary]], mscorlib",
+          "$values": []
+        },
+        "ShieldingSegments": {
+          "$type": "System.Collections.Generic.List`1[[Eos.Models.Satellite.ShieldingSegment, SatelliteLibrary]], mscorlib",
+          "$values": []
+        }
+      },
+      "StructureMass": 2.304,
+      "StructureMomentOfInertia": "{{M11:0.012286, M12:-0.000065, M13:-0.000236}, {M21:-0.000065, M22:0.012726, M23:-0.000039}, {M31:-0.000236, M32:-0.000039, M33:0.005707}}",
+      "StructureCentreOfMass": "{X:0, Y:0, Z:0}"
+    },
+    "Kinematic Model": {
+      "$type": "Eos.Models.Satellite.IntegratingAttitudeKinematicModel, SatelliteLibrary",
+      "InitialRoll": 0.0,
+      "InitialPitch": 0.0,
+      "InitialYaw": 0.0,
+      "InitialRates": "{X:0, Y:0, Z:0}"
+    },
+    "Orbit Model": {
+      "$type": "Eos.Models.Satellite.Sgp4OrbitPropagator, SatelliteLibrary",
+      "Tle1": "1 25544U 98067A   24001.50000000  .00000000  00000-0  00000-0 2    07",
+      "Tle2": "2 25544 097.6000 010.0000 0001000 000.0000 000.0000 15.25000000000009",
+      "Inclination": 97.6,
+      "Eccentricity": 0.0001,
+      "RAAN": 10.0,
+      "ArgPerigee": 0.0,
+      "BStar": 0.0,
+      "MeanMotion": 15.25,
+      "MeanAnomaly": 0.0,
+      "EpochTime": "2024-01-01T12:00:00",
+      "ObjectIdentificationNumber": 25544,
+      "Classification": "U",
+      "InternationalDesignator": "98067A  ",
+      "MeanMotionDot": 0.0,
+      "MeanMotionDot2": 0.0,
+      "ElsetType": 2,
+      "ElsetNumber": 0,
+      "RevNoAtEpoch": 0
+    },
+    "Numeric Integrator": {
+      "$type": "Eos.Models.Satellite.Rk4Integrator`3[[Eos.Models.Satellite.AttitudeState, SatelliteLibrary],[Eos.Models.Satellite.AttitudeDerivative, SatelliteLibrary],[Eos.Models.Satellite.SatelliteNumericIntegrationUserData, SatelliteLibrary]], SatelliteLibrary"
+    },
+    "Panel -X": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+      "DimX": 0.14,
+      "DimY": 0.1,
+      "NumSurfModelSegsX": 1,
+      "NumSurfModelSegsY": 1,
+      "HasHole": false,
+      "HoleX": 0.0,
+      "HoleY": 0.0,
+      "HoleRadius": 0.0,
+      "Position": "{X:-0.05, Y:0.05, Z:0.02}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:0.00000000, M22:-1.00000000, M23:0.00000000}, {M31:-1.00000000, M32:0.00000000, M33:0.00000000}}"
+    },
+    "Panel +X": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+      "DimX": 0.14,
+      "DimY": 0.1,
+      "NumSurfModelSegsX": 1,
+      "NumSurfModelSegsY": 1,
+      "HasHole": false,
+      "HoleX": 0.0,
+      "HoleY": 0.0,
+      "HoleRadius": 0.0,
+      "Position": "{X:0.05, Y:-0.05, Z:0.02}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:1.00000000, M32:0.00000000, M33:0.00000000}}"
+    },
+    "Panel -Y": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+      "DimX": 0.04,
+      "DimY": 0.1,
+      "NumSurfModelSegsX": 1,
+      "NumSurfModelSegsY": 1,
+      "HasHole": true,
+      "HoleX": 0.02,
+      "HoleY": 0.05,
+      "HoleRadius": 0.008,
+      "Position": "{X:0.05, Y:-0.05, Z:-0.02}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:1.00000000}, {M21:-1.00000000, M22:0.00000000, M23:0.00000000}, {M31:0.00000000, M32:-1.00000000, M33:0.00000000}}"
+    },
+    "Panel +Y": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+      "DimX": 0.04,
+      "DimY": 0.1,
+      "NumSurfModelSegsX": 1,
+      "NumSurfModelSegsY": 1,
+      "HasHole": true,
+      "HoleX": 0.02,
+      "HoleY": 0.05,
+      "HoleRadius": 0.008,
+      "Position": "{X:0.05, Y:0.05, Z:0.02}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:-1.00000000, M22:0.00000000, M23:0.00000000}, {M31:0.00000000, M32:1.00000000, M33:0.00000000}}"
+    },
+    "Panel -Z": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+      "DimX": 0.1,
+      "DimY": 0.1,
+      "NumSurfModelSegsX": 1,
+      "NumSurfModelSegsY": 1,
+      "HasHole": false,
+      "HoleX": 0.0,
+      "HoleY": 0.0,
+      "HoleRadius": 0.0,
+      "Position": "{X:0.05, Y:-0.05, Z:-0.12}",
+      "Orientation": "{{M11:-1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:0.00000000, M32:0.00000000, M33:-1.00000000}}"
+    },
+    "Solar Panel +Z": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CubeSat1USolarPanel, CubeSatLibrary",
+      "MaxMagneticMoment": 0.001,
+      "MaxSolarPower": 2.3,
+      "IsEnclosingPanel": true,
+      "Position": "{X:0.05, Y:0.05, Z:0.126}",
+      "Orientation": "{{M11:-1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:-1.00000000, M23:0.00000000}, {M31:0.00000000, M32:0.00000000, M33:1.00000000}}"
+    },
+    "Solar Panel -Y1": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CubeSat1USolarPanel, CubeSatLibrary",
+      "MaxMagneticMoment": 0.001,
+      "MaxSolarPower": 2.3,
+      "IsEnclosingPanel": true,
+      "Position": "{X:0.05, Y:-0.05, Z:-0.12}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:1.00000000}, {M21:-1.00000000, M22:0.00000000, M23:0.00000000}, {M31:0.00000000, M32:-1.00000000, M33:0.00000000}}"
+    },
+    "Solar Panel -Y2": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CubeSat1USolarPanel, CubeSatLibrary",
+      "MaxMagneticMoment": 0.001,
+      "MaxSolarPower": 2.3,
+      "IsEnclosingPanel": true,
+      "Position": "{X:0.05, Y:-0.05, Z:0.02}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:1.00000000}, {M21:-1.00000000, M22:0.00000000, M23:0.00000000}, {M31:0.00000000, M32:-1.00000000, M33:0.00000000}}"
+    },
+    "Solar Panel +Y1": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CubeSat1USolarPanel, CubeSatLibrary",
+      "MaxMagneticMoment": 0.001,
+      "MaxSolarPower": 2.3,
+      "IsEnclosingPanel": true,
+      "Position": "{X:0.05, Y:0.05, Z:0.12}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:-1.00000000, M22:0.00000000, M23:0.00000000}, {M31:0.00000000, M32:1.00000000, M33:0.00000000}}"
+    },
+    "Solar Panel +Y2": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CubeSat1USolarPanel, CubeSatLibrary",
+      "MaxMagneticMoment": 0.001,
+      "MaxSolarPower": 2.3,
+      "IsEnclosingPanel": true,
+      "Position": "{X:0.05, Y:0.05, Z:-0.02}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:-1.00000000, M22:0.00000000, M23:0.00000000}, {M31:0.00000000, M32:1.00000000, M33:0.00000000}}"
+    },
+    "Solar Panel +X": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CubeSat1USolarPanel, CubeSatLibrary",
+      "MaxMagneticMoment": 0.001,
+      "MaxSolarPower": 2.3,
+      "IsEnclosingPanel": true,
+      "Position": "{X:0.05, Y:-0.05, Z:0.12}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:1.00000000, M32:0.00000000, M33:0.00000000}}"
+    },
+    "Solar Panel -X": {
+      "$type": "Eos.Models.Satellite.CubeSatLibrary.CubeSat1USolarPanel, CubeSatLibrary",
+      "MaxMagneticMoment": 0.001,
+      "MaxSolarPower": 2.3,
+      "IsEnclosingPanel": true,
+      "Position": "{X:-0.05, Y:0.05, Z:0.12}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:0.00000000, M22:-1.00000000, M23:0.00000000}, {M31:-1.00000000, M32:0.00000000, M33:0.00000000}}"
+    },
+    "Magnetometer1": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeMagDeploy, CubeSpaceEosLibrary",
+      "Orientation": "{{M11:0.00000000, M12:-1.00000000, M13:0.00000000}, {M21:0.00000000, M22:0.00000000, M23:1.00000000}, {M31:-1.00000000, M32:0.00000000, M33:0.00000000}}",
+      "Deployed": false,
+      "Sensitivity": "{{M11:1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:0.00000000, M32:0.00000000, M33:1.00000000}}",
+      "Offset": "{X:0, Y:0, Z:0}",
+      "Position": "{X:-0.051, Y:-0.025, Z:-0.1}"
+    },
+    "Magnetometer2": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeMagCompact, CubeSpaceEosLibrary",
+      "Sensitivity": "{{M11:1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:0.00000000, M32:0.00000000, M33:1.00000000}}",
+      "Offset": "{X:0, Y:0, Z:0}",
+      "Position": "{X:0.056, Y:-0.03, Z:0}",
+      "Orientation": "{{M11:0.00000000, M12:-1.00000000, M13:0.00000000}, {M21:0.00000000, M22:0.00000000, M23:1.00000000}, {M31:-1.00000000, M32:0.00000000, M33:0.00000000}}"
+    },
+    "Magnetorquer": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeTorquersCr0003, CubeSpaceEosLibrary",
+      "Mtq1Position": "{X:0, Y:0, Z:0.03}",
+      "Mtq2Position": "{X:0, Y:0.04, Z:0.03}",
+      "Mtq3Position": "{X:0, Y:0.04, Z:0.07}",
+      "Mtq1Alignment": "{X:0, Y:1, Z:0}",
+      "Mtq2Alignment": "{X:-1, Y:0, Z:0}",
+      "Mtq3Alignment": "{X:0, Y:0, Z:1}",
+      "PulseDurationResolution": 0.01,
+      "MaximumPulseDuration": 0.8
+    },
+    "CubeSense Sun1": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeSenseSunModel, CubeSpaceEosLibrary",
+      "Position": "{X:0, Y:0.04, Z:0}",
+      "Orientation": "{{M11:1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:0.00000000, M23:-1.00000000}, {M31:0.00000000, M32:1.00000000, M33:0.00000000}}"
+    },
+    "CubeSense Sun2": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeSenseSunModel, CubeSpaceEosLibrary",
+      "Position": "{X:0, Y:-0.04, Z:0}",
+      "Orientation": "{{M11:-1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:0.00000000, M23:-1.00000000}, {M31:0.00000000, M32:-1.00000000, M33:0.00000000}}"
+    },
+    "CSS": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeCoarseSunSensor, CubeSpaceEosLibrary",
+      "Css1Alignment": "{X:0, Y:1, Z:0}",
+      "Css2Alignment": "{X:1, Y:0, Z:0}",
+      "Css3Alignment": "{X:1, Y:0, Z:0}",
+      "Css4Alignment": "{X:0, Y:0, Z:-1}",
+      "Css5Alignment": "{X:0, Y:0, Z:-1}",
+      "Css6Alignment": "{X:0, Y:-1, Z:0}",
+      "Css7Alignment": "{X:-1, Y:0, Z:0}",
+      "Css8Alignment": "{X:-1, Y:0, Z:0}",
+      "Css9Alignment": "{X:0, Y:0, Z:1}",
+      "Css10Alignment": "{X:0, Y:0, Z:1}",
+      "Position": "{X:0, Y:0, Z:0}",
+      "Orientation": "{{M11:1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:0.00000000, M32:0.00000000, M33:1.00000000}}"
+    },
+    "Rate Sensor": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.Adcs2Imu, CubeSpaceEosLibrary",
+      "AxisXAlignment": "{X:0, Y:1, Z:0}",
+      "AxisYAlignment": "{X:-1, Y:0, Z:0}",
+      "AxisZAlignment": "{X:0, Y:0, Z:1}"
+    },
+    "CubeComputer": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeComputer5, CubeSpaceEosLibrary",
+      "ControllerConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigAdcsController, nodedef",
+        "ConModeDefault": 0,
+        "Kd": 0.2,
+        "Kdsun": 0.0,
+        "Kdecl": 0.0,
+        "Ks": 0.02,
+        "Kdf": 1.0,
+        "Kn": 0.2,
+        "Kq": 1.0,
+        "Kqx": 0.0,
+        "Kqy": 0.0,
+        "Kqz": 0.0,
+        "Kh": 2.0,
+        "Kp1": 0.005,
+        "Kd1": 0.04,
+        "Kp2": 0.02,
+        "Kd2": 0.08,
+        "Kp3": 0.08,
+        "Kd3": 0.16,
+        "Ki3": 0.001,
+        "wy_ref": -1.0,
+        "H_ref": -0.0033,
+        "Hy_bias": 0.0,
+        "YawCompensate": false
+      },
+      "EstimatorConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigAdcsEstimator, nodedef",
+        "EstModeMainDefault": 0,
+        "EstModeBackupDefault": 0,
+        "MagR": 0.001,
+        "CssR": 10.0,
+        "FssR": 0.0001,
+        "HssR": 0.0001,
+        "StrR": 1E-08,
+        "RkfQ": 0.0002,
+        "EkfQ": 1E-09,
+        "NutDeps": 3.66E-05,
+        "NutDpsi": -4.898E-05,
+        "EkfUseFss": true,
+        "EkfUseCss": false,
+        "EkfUseHss": false,
+        "EkfUseStr": false,
+        "TVec1": 1,
+        "TVec2": 0
+      },
+      "SatelliteConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigAdcsSatellite, nodedef",
+        "Ixx": 0.012286,
+        "Iyy": 0.012726,
+        "Izz": 0.005707,
+        "Ixy": -0.000065,
+        "Ixz": -0.000236,
+        "Iyz": -0.000039,
+        "SunPointBodyVecX": 0.0,
+        "SunPointBodyVecY": -1.0,
+        "SunPointBodyVecZ": 0.0,
+        "TgtTrackBodyVecX": 1.0,
+        "TgtTrackBodyVecY": 0.0,
+        "TgtTrackBodyVecZ": 0.0,
+        "SatTrackBodyVecX": 1.0,
+        "SatTrackBodyVecY": 0.0,
+        "SatTrackBodyVecZ": 0.0
+      },
+      "MountConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigMount, nodedef",
+        "MountStackX": 3,
+        "MountStackY": 2,
+        "MountStackZ": 5,
+        "MountMtq0": 3,
+        "MountMtq1": 2,
+        "MountMtq2": 5,
+        "MountRwl0": 3,
+        "MountRwl1": 2,
+        "MountRwl2": 5,
+        "MountRwl3": 0,
+        "MountRwlPyrAlpha": 0.0,
+        "MountRwlPyrBeta": 0.0,
+        "MountRwlPyrGamma": 0.0,
+        "MountCss0": 3,
+        "MountCss1": 1,
+        "MountCss2": 1,
+        "MountCss3": 6,
+        "MountCss4": 6,
+        "MountCss5": 4,
+        "MountCss6": 2,
+        "MountCss7": 2,
+        "MountCss8": 5,
+        "MountCss9": 5,
+        "MountFss0Alpha": 0.0,
+        "MountFss0Beta": 0.0,
+        "MountFss0Gamma": 90.0,
+        "MountFss1Alpha": 0.0,
+        "MountFss1Beta": 180.0,
+        "MountFss1Gamma": 90.0,
+        "MountFss2Alpha": 0.0,
+        "MountFss2Beta": 0.0,
+        "MountFss2Gamma": 0.0,
+        "MountFss3Alpha": 0.0,
+        "MountFss3Beta": 0.0,
+        "MountFss3Gamma": 0.0,
+        "MountHss0Alpha": 0.0,
+        "MountHss0Beta": 0.0,
+        "MountHss0Gamma": 0.0,
+        "MountHss1Alpha": 0.0,
+        "MountHss1Beta": 0.0,
+        "MountHss1Gamma": 0.0,
+        "MountMag0Alpha": 0.0,
+        "MountMag0Beta": 90.0,
+        "MountMag0Gamma": -90.0,
+        "MountMag1Alpha": 0.0,
+        "MountMag1Beta": 90.0,
+        "MountMag1Gamma": -90.0,
+        "MountStr0Alpha": 0.0,
+        "MountStr0Beta": 0.0,
+        "MountStr0Gamma": 0.0,
+        "MountStr1Alpha": 0.0,
+        "MountStr1Beta": 0.0,
+        "MountStr1Gamma": 0.0,
+        "MountExtSensor0Alpha": 0.0,
+        "MountExtSensor0Beta": 0.0,
+        "MountExtSensor0Gamma": 0.0,
+        "MountExtSensor1Alpha": 0.0,
+        "MountExtSensor1Beta": 0.0,
+        "MountExtSensor1Gamma": 0.0
+      },
+      "OrbitSatParams": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigOrbitSatParams, nodedef",
+        "OrbitEpoch": 24001.5,
+        "OrbitIncl": 97.6,
+        "OrbitRaan": 10.0,
+        "OrbitEccen": 0.0001,
+        "OrbitAP": 0.0,
+        "OrbitMA": 0.0,
+        "OrbitMM": 15.25,
+        "OrbitBstar": 0.0
+      },
+      "OrbitTargetParams": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigOrbitTargetParams, nodedef",
+        "OrbitEpoch": 22001.0,
+        "OrbitIncl": 97.533,
+        "OrbitRaan": 80.0,
+        "OrbitEccen": 0.0001,
+        "OrbitAP": 0.0,
+        "OrbitMA": 330.0,
+        "OrbitMM": 15.173867,
+        "OrbitBstar": 0.0,
+        "DataBytes": {
+          "$type": "System.Byte[], mscorlib",
+          "$value": "AAAAAEB81UAnMQisHGJYQAAAAAAAAFRALUMc6+I2Gj8AAAAAAAAAAAAAAAAAoHRAD7VtGAVZLkAAAAAAAAAAAA=="
+        }
+      },
+      "MagMainConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigMag0OrbitCal, nodedef",
+        "Offset1": 0.0,
+        "Offset2": 0.0,
+        "Offset3": 0.0,
+        "SensMatrix11": 1.0,
+        "SensMatrix22": 1.0,
+        "SensMatrix33": 1.0,
+        "SensMatrix12": 0.0,
+        "SensMatrix13": 0.0,
+        "SensMatrix21": 0.0,
+        "SensMatrix23": 0.0,
+        "SensMatrix31": 0.0,
+        "SensMatrix32": 0.0
+      },
+      "MagRedConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigMag1OrbitCal, nodedef",
+        "Offset1": 0.0,
+        "Offset2": 0.0,
+        "Offset3": 0.0,
+        "SensMatrix11": 1.0,
+        "SensMatrix22": 1.0,
+        "SensMatrix33": 1.0,
+        "SensMatrix12": 0.0,
+        "SensMatrix13": 0.0,
+        "SensMatrix21": 0.0,
+        "SensMatrix23": 0.0,
+        "SensMatrix31": 0.0,
+        "SensMatrix32": 0.0
+      },
+      "NodeSelecionConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigNodeSelection, nodedef",
+        "SelectRwl": 7,
+        "SelectMag": 3,
+        "SelectFss": 3,
+        "SelectHss": 0,
+        "SelectGyro": 12,
+        "SelectStr": 0,
+        "SelectGnss": 1,
+        "SelectExt": 0
+      },
+      "RwConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigActuatorRwl, nodedef",
+        "Rwl0Iw": 2.11278E-06,
+        "Rwl0Hmax": 0.0022125,
+        "Rwl0Nmax": 0.00023,
+        "Rwl1Iw": 2.11278E-06,
+        "Rwl1Hmax": 0.0022125,
+        "Rwl1Nmax": 0.00023,
+        "Rwl2Iw": 2.11278E-06,
+        "Rwl2Hmax": 0.0022125,
+        "Rwl2Nmax": 0.00023,
+        "Rwl3Iw": 2.11278E-06,
+        "Rwl3Hmax": 0.0022125,
+        "Rwl3Nmax": 0.00023,
+        "NDel": 0.0,
+        "RwlScheme": 2,
+        "RwlFailId": 0,
+        "PyrHnom": 0.0025,
+        "PyrTiltAngle": 26.565
+      },
+      "MtqConfig": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigActuatorMtq, nodedef",
+        "Mtq0Mmax": 0.3,
+        "Mtq1Mmax": 0.3,
+        "Mtq2Mmax": 0.3,
+        "OnTimeMax": 800,
+        "OnTimeMin": 10,
+        "MtqFfac": 0.0
+      },
+      "Asgp4Config": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ConfigAsgp4, nodedef",
+        "BatchSize": 1000,
+        "MaxTimeBetween": 86400,
+        "MaxPosErr": 100,
+        "TimeGain": 1.2,
+        "UpdateRaanIncl": true,
+        "UpdateEccen": false,
+        "UpdateApMa": false,
+        "UpdateTime": true
+      },
+      "ReferenceCommands": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+ReferenceCommands, nodedef",
+        "CmdRpyRoll": 0.0,
+        "CmdRpyPitch": 0.0,
+        "CmdRpyYaw": 0.0,
+        "CmdTargetLatitude": 51.41398,
+        "CmdTargetLongitude": -1.29,
+        "CmdTargetAltitude": 0.0,
+        "CmdEciVecX": 0.0,
+        "CmdEciVecY": 0.0,
+        "CmdEciVecZ": 0.0
+      },
+      "OpenLoopWheelSpeeds": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+OpenLoopCommandRwl, nodedef",
+        "Rwl0SpeedCmd": 0.0,
+        "Rwl1SpeedCmd": 0.0,
+        "Rwl2SpeedCmd": 0.0,
+        "Rwl3SpeedCmd": 0.0
+      },
+      "OpenLoopWheelMomentum": {
+        "$type": "CubeSpace.CubeComponents.CubeComputerControlProgram8+OpenLoopCommandHxyzRW, nodedef",
+        "Hx": 0.0,
+        "Hy": 0.0,
+        "Hz": 0.0
+      },
+      "ControlMode": 12,
+      "EstimationMode": 6,
+      "OrbitMode": 0,
+      "Position": "{X:0, Y:0, Z:-0.05}",
+      "Orientation": "{{M11:1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:0.00000000, M32:0.00000000, M33:1.00000000}}"
+    },
+    "Reaction Wheel2": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeWheel0017, CubeSpaceEosLibrary",
+      "WheelHeight": 0.026,
+      "WheelRadius": 0.014,
+      "Position": "{X:-0.03, Y:0, Z:0.1}",
+      "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:0.00000000, M22:-1.00000000, M23:0.00000000}, {M31:-1.00000000, M32:0.00000000, M33:0.00000000}}"
+    },
+    "Reaction Wheel1": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeWheel0017, CubeSpaceEosLibrary",
+      "WheelHeight": 0.026,
+      "WheelRadius": 0.014,
+      "Position": "{X:0, Y:0, Z:0.1}",
+      "Orientation": "{{M11:1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:0.00000000, M23:-1.00000000}, {M31:0.00000000, M32:1.00000000, M33:0.00000000}}"
+    },
+    "Reaction Wheel3": {
+      "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeWheel0017, CubeSpaceEosLibrary",
+      "WheelHeight": 0.026,
+      "WheelRadius": 0.014,
+      "Position": "{X:0.03, Y:0, Z:0.1}",
+      "Orientation": "{{M11:1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:0.00000000, M32:0.00000000, M33:1.00000000}}"
+    }
+  }
+}
