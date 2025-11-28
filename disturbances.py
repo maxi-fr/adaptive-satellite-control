@@ -1,11 +1,76 @@
 
 import numpy as np
-from dynamics import MU
 from environment import solar_radiation_pressure_constant
 from kinematics import orc_to_sbc, eci_to_sbc
 from typing import List
 
 from satellite import Surface, center_of_pressure
+
+# Earth constants
+R_EARTH = 6.378137e6  # Earth's equatorial radius in meters
+G = 6.67430e-11  # universal gravitational constant
+M = 5.972e24  # mass of earth
+MU = G*M  # gravitational parameter
+
+J2 = 1.08262668e-3   # J2 zonal harmonic
+J3 = -2.5327e-6      # J3 zonal harmonic
+J4 = -1.6196e-6      # J4 zonal harmonic
+
+def non_spherical_gravity_forces(r_eci: np.ndarray, m: float) -> np.ndarray:
+    """
+    Calculates the disturbance forces due to Earth's non-spherical gravity.
+
+    This function computes the perturbing acceleration from the J2, J3, and J4
+    zonal harmonic coefficients and returns the corresponding force.
+
+    Parameters
+    ----------
+    r_eci : np.ndarray, shape (3,)
+        Position vector of the satellite in the ECI frame [m].
+    m : float
+        Mass of the satellite [kg].
+
+    Returns
+    -------
+    np.ndarray, shape (3,)
+        The total disturbance force vector in the ECI frame [N].
+    """
+    r = np.linalg.norm(r_eci)
+    x, y, z = r_eci
+    x_r = x / r
+    y_r = y /r
+
+    z_r = z / r
+    z_r2 = z_r * z_r
+    z_r3 = z_r2 * z_r
+    z_r4 = z_r3 * z_r
+
+    MU_r = MU / r**2
+    RE_r = R_EARTH / r
+
+    # J2 acceleration
+    factor_J2 = -1.5 * J2 * MU_r * RE_r**2
+    term_J2 = 1 - 5 * z_r2
+    a_J2 = factor_J2 * np.array([term_J2 * x_r,
+                                 term_J2 * y_r,
+                                 (3 - 5 * z_r2) * z_r])
+
+    # J3 acceleration
+    factor_J3 = -0.5 * J3 * MU_r * RE_r**3
+    term_J3_xy = 5 * (7 * z_r3 - 3 * z_r)
+    a_J3 = factor_J3 * np.array([term_J3_xy * x_r,
+                                 term_J3_xy * y_r,
+                                 3 * (10 * z_r2 - (35/3) * z_r4 - 1)])
+
+    # J4 acceleration
+    factor_J4 = -0.625 * J4 * MU_r * RE_r**4
+    term_J4_xy = 3 - 42 * z_r2 + 63 * z_r4
+    a_J4 = factor_J4 * np.array([term_J4_xy * x_r,
+                                 term_J4_xy * y_r,
+                                 -(15 - 70 * z_r2 + 63 * z_r4) * z_r])
+
+    a_total = a_J2 + a_J3 + a_J4
+    return a_total * m
 
 
 # Gravitational parameters (m^3 / s^2)

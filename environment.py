@@ -94,7 +94,8 @@ def magnetic_field_vector(dt_utc: datetime.datetime, lat_deg: float, lon_deg: fl
 
     This function uses the IGRF model to get the magnetic field components
     in the North-East-Down (NED) frame, then transforms them to the
-    Earth-Centered Inertial (ECI) frame.
+    Earth-Centered Inertial (ECI) J2000 frame.
+
 
     Parameters
     ----------

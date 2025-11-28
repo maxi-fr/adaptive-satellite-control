@@ -43,7 +43,7 @@ class Spacecraft:
         self.surfaces = surfaces
 
     @classmethod
-    def from_json(cls, file_path: str):
+    def from_eos_file(cls, data: dict):
         pass
         
 
@@ -148,6 +148,21 @@ class Surface:
     def plot(self, ax, color="cyan", alpha=0.4, normal_scale=0.05):
         """
         Plot the rectangular surface and its normal vector in a 3D matplotlib axis.
+
+        Example:
+                surface = Surface(...)
+                fig = plt.figure(figsize=(8, 8))
+                ax = fig.add_subplot(111, projection='3d')
+
+                surface.plot(ax)
+
+                ax.set_ylabel("Y axis")
+                ax.set_xlabel("X axis")
+                ax.set_zlabel("Z axis")
+
+                ax.set_aspect("equal")
+                ax.legend()
+                fig.tight_layout()
         """
 
         
@@ -283,7 +298,7 @@ def replace_orientation_matrices(data_structure):
     """
     if isinstance(data_structure, dict):
         for key, value in data_structure.items():
-            if key == "Orientation" and isinstance(value, str):
+            if (key == "Orientation" or key == "Position") and isinstance(value, str):
                 data_structure[key] = string_to_matrix(value)
             else:
                 replace_orientation_matrices(value)

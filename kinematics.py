@@ -2,7 +2,7 @@ from scipy.spatial.transform import Rotation as R
 import numpy as np
 
 from astropy.time import Time
-from astropy.coordinates import EarthLocation
+from astropy.coordinates import EarthLocation, SkyCoord
 import astropy.units as u
 import numpy as np
 import casadi as ca
@@ -31,11 +31,14 @@ def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
     R_IO = R.from_matrix(np.array([o_1I, o_2I, o_3I]))
     return R_IO
 
-# def ocr_to_sbc(roll_deg, pitch_deg, yaw_deg):
+def euler_ocr_to_sbc(roll_deg: float, pitch_deg: float, yaw_deg: float):
+    """
+    TODO
+    """
 
-#     R_BO = R.from_euler('yxz', [pitch_deg, roll_deg, yaw_deg], degrees=True)
+    R_BO = R.from_euler('yxz', [pitch_deg, roll_deg, yaw_deg], degrees=True)
 
-#     return R_BO
+    return R_BO
 
 
 def orc_to_sbc(q_BI: np.ndarray, r_eci: np.ndarray, v_eci: np.ndarray) -> R:
@@ -83,7 +86,6 @@ def eci_to_geodedic(pos_eci: np.ndarray) -> tuple[float, float, float]:
     alt = loc.height.to(u.m).value # type: ignore
 
     return lat, lon, alt
-
 
 
 def quaternion_kinematics(q_BI: np.ndarray, omega: np.ndarray) -> np.ndarray:
