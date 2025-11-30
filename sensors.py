@@ -1,22 +1,27 @@
 # TODO
-from abc import ABC
+from abc import ABC, abstractmethod
 import datetime
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 
+
+
+# TODO: Refactor: only need 1 generic gaussian random walk bias + gaussian noise class. bias noise = 0 for sensor like SunSensor
 
 class Sensor(ABC):
     def __init__(self, frequency: float):
 
         self.period = datetime.timedelta(seconds=1/frequency).total_seconds()
 
-        self.last_measurement = datetime.datetime(0, 0, 0)
+        self.last_measurement = datetime.datetime(datetime.MINYEAR, 1, 1)
 
         return False
 
+    @abstractmethod
     def measure(self, t: datetime.datetime):
         pass
-
+        
+    @abstractmethod
     def read(self, t: datetime.datetime):
         pass
 
@@ -29,7 +34,7 @@ class Accelerometer(Sensor):
         self.sigma_sq = sigma_sq
 
 
-    def measure(self, t: datetime.datetime, d_v: np.ndarray, R_BO: R):
+    def measure(self, t: datetime.datetime, d_v: np.ndarray, R_BO: R): # type: ignore
         dt = (t - self.last_measurement).total_seconds()
 
         if dt >= self.period:
@@ -40,7 +45,7 @@ class Accelerometer(Sensor):
 
             self.bias = bias
 
-    def read(self, t: datetime.datetime):
+    def read(self, t: datetime.datetime): # type: ignore
         """
         Returns last measured value for the accelerometer. 
 
@@ -69,7 +74,7 @@ class Gyroscope(Sensor):
         self.sigma_sq = sigma_sq
 
 
-    def measure(self, t: datetime.datetime, omega: np.ndarray):
+    def measure(self, t: datetime.datetime, omega: np.ndarray): # type: ignore
         dt = (t - self.last_measurement).total_seconds()
 
         if dt >= self.period:
@@ -80,7 +85,7 @@ class Gyroscope(Sensor):
 
             self.bias = bias
 
-    def read(self, t: datetime.datetime):
+    def read(self, t: datetime.datetime): # type: ignore
         """
         Returns last measured value for the gyroscope. 
 
@@ -106,7 +111,7 @@ class Magnetometer(Sensor):
         self.const_bias = const_bias
         self.B = np.zeros(3)
 
-    def measure(self, t: datetime.datetime, B_body: np.ndarray):
+    def measure(self, t: datetime.datetime, B_body: np.ndarray): # type: ignore
         dt = (t - self.last_measurement).total_seconds()
 
         if dt >= self.period:
@@ -156,14 +161,14 @@ class GPS(Sensor):
         self.sigma_sq = sigma_sq
         self.sat_pos = np.zeros(3)
 
-    def measure(self, t: datetime.datetime, sat_pos: np.ndarray):
+    def measure(self, t: datetime.datetime, sat_pos: np.ndarray): # type: ignore
         dt = (t - self.last_measurement).total_seconds()
 
         if dt >= self.period:
             self.last_measurement = t
             self.sat_pos = sat_pos + self.sigma_sq * np.random.default_rng().normal(0, 1, 3)
 
-    def read(self, t: datetime.datetime):
+    def read(self, t: datetime.datetime): # type: ignore
 
         return self.sat_pos, self.last_measurement == t 
     
@@ -175,14 +180,15 @@ class RW_tachometer(Sensor):
         self.sigma_sq = sigma_sq
         self.omega = 0
 
-    def measure(self, t: datetime.datetime, omega: np.ndarray):
+    def measure(self, t: datetime.datetime, omega: np.ndarray): # type: ignore
         dt = (t - self.last_measurement).total_seconds()
 
         if dt >= self.period:
             self.last_measurement = t
             self.omega = omega + self.sigma_sq * np.random.default_rng().normal(0, 1, 1)
 
-    def read(self, t: datetime.datetime):
+    def read(self, t: datetime.datetime): # type: ignore
 
         return self.omega, self.last_measurement == t 
     
+

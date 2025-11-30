@@ -88,6 +88,18 @@ def eci_to_geodedic(pos_eci: np.ndarray) -> tuple[float, float, float]:
     return lat, lon, alt
 
 
+def quaternion_product(qa: np.ndarray, qb: np.ndarray):
+    q_ret = np.empty(4)
+
+    q_ret[:3] = qb[3]*qa[:3] + qa[3]*qb[:3] + np.cross(qa[:3], qb[:3])
+    q_ret[3] = qa[3]*qb[3] - np.dot(qa[:3], qb[:3])
+
+    return q_ret
+
+def quaternion_rotation(q, x):
+
+    return quaternion_product(q1, quaternion_product(q2, q3))
+
 def quaternion_kinematics(q_BI: np.ndarray, omega: np.ndarray) -> np.ndarray:
     """
     Compute the derivative of the quaternion. Using the scalar last convention: q_BI = [qx, qy, qz, qw]

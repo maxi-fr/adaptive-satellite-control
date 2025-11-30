@@ -10,6 +10,7 @@ import environment as env
 import disturbances as dis
 from kinematics import euler_ocr_to_sbc, orc_to_eci, orc_to_sbc, quaternion_kinematics, eci_to_geodedic
 from satellite import Spacecraft, replace_orientation_matrices, string_to_matrix
+from tqdm import tqdm
 
 
 class Simulation:
@@ -25,9 +26,10 @@ class Simulation:
         self.inital_state[:3] = initial_r_ECI
         self.inital_state[3:6] = initial_v_ECI
 
-        # BI = BO * (IO)-1
+        # R_BI = R_BO * (R_IO)^-1
         self.inital_state[6:10] = (initial_attitude_BO * orc_to_eci(self.inital_state[0:3], self.inital_state[3:6]).inv()
                             ).as_quat(scalar_first=False)  # quaternion representing rotation from ECI to Body Frame
+        
         if initial_ang_vel_B is not None:
             self.inital_state[10:13] = initial_ang_vel_B
 
@@ -50,7 +52,7 @@ class Simulation:
         with open(eos_file_path, "r") as f:
             eos_file = json.load(f)
 
-        data = replace_orientation_matrices(eos_file)  
+        data: dict = replace_orientation_matrices(eos_file)  # type: ignore
 
         settings = data["Settings"] # type: ignore
         t0 = datetime.datetime.fromisoformat(settings["SimulationStart"]+"Z")
@@ -74,46 +76,49 @@ class Simulation:
         orbit_model = SGP4.twoline2rv(tle1, tle2)
         r_ECI, v_ECI = orbit_model.propagate(t0)
 
-        Simulation(Spacecraft.from_eos_file(data), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, "Log_file.csv", dt, t0, tf)
+        Simulation(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, "Log_file.csv", dt, t0, tf)
 
     def run(self):
         state = self.inital_state
         t = self.t0
         u = np.zeros(6)
-
-        while t < self.tf:
-
-            k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor get get current measurements. k1 is passed to integration step, to avoid recomputation 
-            
-            # Flight software (FSW)
-            sun_mea = self.sat.sun_sensor.read(t)
-            mag_mea =self.sat.magnetometer.read(t)
-            gps_mea = self.sat.gps.read(t)
-            acc_mea = self.sat.accelerometer.read(t)
-            gyro_mea = self.sat.gyro.read(t)
-            omega_rw_mea = [rw.read(t) for rw in self.sat.rw_speed_sensors]
-
-            # TODO: estimators
-            sun_pos_est = sun_mea
-            state_est = state
-
-            # TODO: controllers
-            u_rw = np.zeros(3)
-            u_mag = np.zeros(3)
-            
-            # logging 
-            # TODO: maybe log to different files. 
-            # Because it could get alot with all different variables: states, measured states, estimated states, environment variables
-            with open(self.log_file, 'a') as f:
-                writer = csv.writer(f)
-                writer.writerow([t] + list(state))
- 
-            # integrate world dynamics (envrionment, orbit, attitude, sensors, actuators)
-            u = np.vstack((u_rw, u_mag))
-            next_state = rk4_step(self.world_dynamics, state, u, t, self.dt, k1)
-
-            t += self.dt
-            state = next_state
+        
+        total_steps = int((self.tf - self.t0).total_seconds() / self.dt.total_seconds())
+        with tqdm(total=total_steps, desc="Running Simulation") as pbar:
+            while t < self.tf:
+    
+                k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor get get current measurements. k1 is passed to integration step, to avoid recomputation 
+                
+                # Flight software (FSW)
+                sun_mea = self.sat.sun_sensor.read(t)
+                mag_mea =self.sat.magnetometer.read(t)
+                gps_mea = self.sat.gps.read(t)
+                acc_mea = self.sat.accelerometer.read(t)
+                gyro_mea = self.sat.gyro.read(t)
+                omega_rw_mea = [rw.read(t) for rw in self.sat.rw_speed_sensors]
+    
+                # TODO: estimators
+                sun_pos_est = sun_mea
+                state_est = state
+    
+                # TODO: controllers
+                u_rw = np.zeros(3)
+                u_mag = np.zeros(3)
+                
+                # logging 
+                # TODO: maybe log to different files. 
+                # Because it could get alot with all different variables: states, measured states, estimated states, environment variables
+                with open(self.log_file, 'a') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([t] + list(state))
+     
+                # integrate world dynamics (envrionment, orbit, attitude, sensors, actuators)
+                u = np.vstack((u_rw, u_mag))
+                next_state = rk4_step(self.world_dynamics, state, u, t, self.dt, k1)
+    
+                t += self.dt
+                state = next_state
+                pbar.update(1)
 
     def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime, update_sensors: bool = False):
         """

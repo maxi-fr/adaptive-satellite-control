@@ -43,8 +43,27 @@ class Spacecraft:
         self.surfaces = surfaces
 
     @classmethod
-    def from_eos_file(cls, data: dict):
-        pass
+    def from_eos_file(cls, data: dict, dt):
+        #TODO: correctly initialize sensors and actuators
+        
+        trace = data["ModelObjects"]["TRACE"]
+
+        m = trace["StructureMass"]
+        J_B = string_to_matrix(trace["StructureMomentOfInertia"])
+
+        surfaces = [Surface.from_eos_panel(v) for k, v in data["ModelObjects"].items() if "panel" in k.lower()]
+        rws = [ReactionWheel(0.2e-3, 6000, 2e-6, a) for a in [[1, 0, 0], [0, 1, 0], [0, 0, 1]]]
+        magnetorquers = [Magnetorquer(0.2e-2, a) for a in [[1, 0, 0], [0, 1, 0], [0, 0, 1]]]
+
+        dt = 0.01
+        sun_sensor = SunSensor(dt, 0.0)
+        magnetometer = Magnetometer(dt, 0.0, np.array([0, 0, 0]))
+        gps = GPS(dt, 0.0)
+        accelerometer = Accelerometer(dt, 0.0, 0.0)
+        gyro = Gyroscope(dt, 0.0, 0.0)
+        rw_speed_sensors = [RW_tachometer(dt, 0.0) for _ in rws]
+
+        return cls(m, J_B, surfaces, rws, magnetorquers, sun_sensor, magnetometer, gps, accelerometer, gyro, rw_speed_sensors)
         
 
     def orbit_dynamics(self, r_eci: np.ndarray, ctrl_force: np.ndarray, dist_force: np.ndarray):
@@ -143,11 +162,13 @@ class Surface:
         R_BS = np.asarray(dict["Orientation"]).T   # idk why the transpose is needed 
         
 
-        return cls(string_to_matrix(dict["Position"]), dict.get("DimX", 0.1), dict.get("DimY", 0.1), R_BS)
+        return cls(dict["Position"], dict.get("DimX", 0.1), dict.get("DimY", 0.1), R_BS)
 
-    def plot(self, ax, color="cyan", alpha=0.4, normal_scale=0.05):
+    def plot(self, ax, R_FB: R|None=None, color="cyan", alpha=0.4, normal_scale=0.05):
         """
         Plot the rectangular surface and its normal vector in a 3D matplotlib axis.
+
+        R_FB: a rotation from the body frame to another frame
 
         Example:
                 surface = Surface(...)
@@ -164,13 +185,25 @@ class Surface:
                 ax.legend()
                 fig.tight_layout()
         """
+        if R_FB is None:
+            pos = self.pos
+            x_axis = self.x_axis
+            y_axis = self.y_axis
+            center = self.center
+            normal = self.normal
+        else:
+            pos = R_FB.apply(self.pos)
+            x_axis = R_FB.apply(self.x_axis)
+            y_axis = R_FB.apply(self.y_axis)
+            center = R_FB.apply(self.center)
+            normal = R_FB.apply(self.normal)
 
         
         corners = np.array([
-            self.pos,
-            self.pos + self.x_axis,
-            self.pos + self.x_axis + self.y_axis,
-            self.pos + self.y_axis
+            pos,
+            pos + x_axis,
+            pos + x_axis + y_axis,
+            pos + y_axis
         ])
 
         corners_closed = np.vstack([corners, corners[0]])
@@ -186,8 +219,8 @@ class Surface:
 
         # Draw normal vector
         ax.quiver(
-            *self.center,
-            *self.normal,
+            *center,
+            *normal,
             length=normal_scale,
             color="red"
         )

@@ -5,7 +5,8 @@ class ReactionWheel:
         self.max_torque = max_torque
         self.max_rpm = max_rpm
         self.inertia = inertia
-        self.spin_axis = spin_axis
+        self.spin_axis = np.asarray(spin_axis)
+        self.K_t = 1 
 
 
     def torque_ang_momentum(self, i, omega_w, omega) -> tuple[float, float]:
@@ -23,7 +24,7 @@ class ReactionWheel:
 class Magnetorquer:
     def __init__(self, max_moment: float, spin_axis: np.ndarray):
         self.max_moment = max_moment
-        self.spin_axis = spin_axis
+        self.spin_axis = np.asarray(spin_axis)
 
     def torque(self, i, B) -> float:
         # TODO

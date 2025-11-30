@@ -7,7 +7,9 @@ from sgp4.conveniences import jday_datetime
 from astropy.time import Time
 import datetime
 
-from disturbances import MU
+G = 6.67430e-11  # universal gravitational constant
+M = 5.972e24  # mass of earth
+MU = G*M  # gravitational parameter
 
 def orbit_dynamics(m: float, r: np.ndarray, ctrl_force: np.ndarray, dist_force: np.ndarray) -> np.ndarray:
     """
