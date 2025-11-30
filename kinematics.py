@@ -117,11 +117,11 @@ def quaternion_kinematics(q_BI: np.ndarray, omega: np.ndarray) -> np.ndarray:
     np.ndarray, shape (4,)
         The time derivative of the quaternion (dq/dt).
     """
-    qx, qy, qz, qw = q_BI
-    wx, wy, wz = omega
-    return 0.5 * np.array([
-        -qx*wx - qy*wy - qz*wz,
-        qw*wx + qy*wz - qz*wy,
-        qw*wy - qx*wz + qz*wx,
-        qw*wz + qx*wy - qy*wx
-    ])
+    q_ret = np.empty(4)
+
+    q_ret[:3] = 0.5 * (omega * q_BI[3] + np.cross(omega, q_BI[:3]))
+    q_ret[3] = -0.5 * np.dot(omega, q_BI[:3])
+
+    return q_ret
+
+

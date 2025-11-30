@@ -63,34 +63,28 @@ def build_system_dynamics(J_hat: np.ndarray, J_w: np.ndarray, A_hat: np.ndarray,
 
     r_ECI = ca.SX.sym('r_ECI', 3)                        
 
+    # actuators
     h_int = A_hat @ (J_w * (omega_w + A_hat @ omega)) 
     tau_rw = A_hat @ K_t_dash * (u_rw - K_e_rw * omega_w) 
 
-
     r_norm = ca.norm_2(r_ECI)
     r_hat = r_ECI / r_norm
-
     B_I = (3 * r_hat * (ca.dot(M_dipole, r_hat)) - M_dipole) / r_norm**3
-
     tau_mag = ca.cross(K_mag * u_mag, quat_rot(q_BI, B_I)) 
 
+    # attitude dynamics
+    q_dot = np.empty(4)
+    q_dot[:3] = 0.5 * (omega * q_BI[3] + ca.cross(omega, q_BI[:3]))
+    q_dot[3] = -0.5 * ca.dot(omega, q_BI[:3])
 
-    qx, qy, qz, qw = q_BI[0], q_BI[1], q_BI[2], q_BI[3]
-    wx, wy, wz = omega[0], omega[1], omega[2]
-    q_dot = 0.5 * ca.vertcat(
-        -qx*wx - qy*wy - qz*wz,
-        qw*wx + qy*wz - qz*wy,
-        qw*wy - qx*wz + qz*wx,
-        qw*wz + qx*wy - qy*wx
-    )
-
+    # attitude dynamics
     cross_term = ca.cross(omega, J_hat @ omega + h_int)
     total_torque = tau_mag - tau_rw - cross_term
     omega_dot = ca.solve(J_hat, total_torque)
     omega_w_dot = u_rw / J_w - A_hat @ omega_dot
 
-    dx = ca.vertcat(q_dot, omega_dot, omega_w_dot)
 
+    dx = ca.vertcat(q_dot, omega_dot, omega_w_dot)
     f = ca.Function("attitude_dynamics", [x, u, r_ECI], [dx])
 
     return f

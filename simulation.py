@@ -225,5 +225,5 @@ def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray
 
     k2 = f(x + 0.5 * dt_float * k1, u, t + 0.5 * dt)
     k3 = f(x + 0.5 * dt_float * k2, u, t + 0.5 * dt)
-    k4 = f(x + dt * k3, u, t + dt)
+    k4 = f(x + dt_float * k3, u, t + dt)
     return x + (dt_float/ 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
