@@ -21,7 +21,7 @@ def atmosphere_density_static(altitude: float) -> float:
     Parameters
     ----------
     altitude : float
-        Altitude in kilometers [km].
+        Altitude in kilometers [m].
 
     Returns
     -------
@@ -33,6 +33,8 @@ def atmosphere_density_static(altitude: float) -> float:
     ValueError
         If the altitude is outside the valid range of 300 to 800 km.
     """
+    altitude = altitude / 1000.0
+
     const = {"p_0":[2.418e-11, 9.158e-12, 3.725e-12, 1.585e-12, 6.967e-13, 1.454e-13, 3.614e-14],
                 "h_0":[300, 350, 400, 450, 500, 600, 700],
                 "H":[52.5, 56.4, 59.4, 62.2, 65.8, 79, 109]}

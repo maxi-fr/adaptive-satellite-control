@@ -73,7 +73,7 @@ class Simulation:
 
         tle1 = data["ModelObjects"]["OrbitModel"]["Tle1"] # type: ignore
         tle2 = data["ModelObjects"]["OrbitModel"]["Tle2"] # type: ignore
-        orbit_model = SGP4.twoline2rv(tle1, tle2)
+        orbit_model = SGP4.from_tle(tle1, tle2)
         r_ECI, v_ECI = orbit_model.propagate(t0)
 
         Simulation(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, "Log_file.csv", dt, t0, tf)
