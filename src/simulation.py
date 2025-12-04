@@ -33,22 +33,23 @@ class Simulation:
         if initial_ang_vel_B is not None:
             self.inital_state[10:13] = initial_ang_vel_B
 
-        if os.path.exists(log_file):
-            for i in range(1000):
-                if not os.path.exists(log_file + "_" + str(i)):
-                    log_file = log_file + "_" + str(i)
-                    break
+        # log_file = log_file[:4]
+        # if os.path.exists(log_file):
+        #     for i in range(1000):
+        #         if not os.path.exists(log_file + "_" + str(i) + ".csv"):
+        #             log_file = log_file + "_" + str(i)
+        #             break
 
         self.log_file = log_file
 
-        with open(self.log_file, 'w') as f:
-            writer = csv.writer(f)
-            writer.writerow(['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
-                            'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
-                             'omega_rw', 'tau_rw', 'i_mag'])
+        # with open(self.log_file, 'w') as f:
+        #     writer = csv.writer(f)
+        #     writer.writerow(['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
+        #                     'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
+        #                      'omega_rw', 'tau_rw', 'i_mag'])
             
     @classmethod
-    def from_json(cls, eos_file_path: str):
+    def from_json(cls, eos_file_path: str) -> "Simulation":
         with open(eos_file_path, "r") as f:
             eos_file = json.load(f)
 
@@ -71,12 +72,12 @@ class Simulation:
         init_ang_vel_B_BI = string_to_matrix(kin_model["InitialRates"])
         init_att_BO = euler_ocr_to_sbc(roll, pitch, yaw)
 
-        tle1 = data["ModelObjects"]["OrbitModel"]["Tle1"] # type: ignore
-        tle2 = data["ModelObjects"]["OrbitModel"]["Tle2"] # type: ignore
+        tle1 = data["ModelObjects"]["Orbit Model"]["Tle1"] # type: ignore
+        tle2 = data["ModelObjects"]["Orbit Model"]["Tle2"] # type: ignore
         orbit_model = SGP4.from_tle(tle1, tle2)
         r_ECI, v_ECI = orbit_model.propagate(t0)
 
-        Simulation(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, "Log_file.csv", dt, t0, tf)
+        return cls(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, "Log_file.csv", dt, t0, tf)
 
     def run(self):
         state = self.inital_state
@@ -161,6 +162,7 @@ class Simulation:
         in_shadow = env.is_in_shadow(r_eci, sun_pos)
         moon_pos = env.moon_position(t)
 
+        #TODO: rotations B->O and B->I get recomputed many times. Speed up by handling them better
         F_grav = dis.non_spherical_gravity_forces(r_eci, self.sat.m)
         F_third = dis.third_body_forces(r_eci, self.sat.m, sun_pos, moon_pos)
         tau_gg = dis.gravity_gradient(r_eci, v_eci, q_BI, self.sat.J_B)

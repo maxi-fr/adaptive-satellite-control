@@ -108,11 +108,11 @@ def gravity_gradient(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, J_B
         The gravity gradient torque vector in the body frame [N*m].
     """
 
-    nadir_body_axis = orc_to_sbc(q_BI, r_eci, v_eci) * np.array([0, 0, 1])
+    nadir_body_axis = orc_to_sbc(q_BI, r_eci, v_eci).apply(np.array([0, 0, 1]))
 
-    gg_torque = (3 * MU) / np.linalg.norm(r_eci)**3 * np.cross(nadir_body_axis, J_B @ nadir_body_axis)
+    gg_torque = (3 * MU) / np.linalg.norm(np.atleast_2d(r_eci), axis=1, keepdims=True)**3 * np.cross(nadir_body_axis, np.matvec(J_B, nadir_body_axis))
 
-    return gg_torque
+    return gg_torque.squeeze()
 
 
 # rad/s earth rotates about the z axis of the eci frame with angular velocity OMEGA_E
@@ -145,6 +145,8 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, sur
     cop = center_of_pressure(surfaces)
 
     v_atm_I = np.cross(OMEGA_E, r_eci)  # = np.array([OMEGA_E[2] * r_eci[1], OMEGA_E[2] * r_eci[0], 0])
+
+    #TODO: rotations get recomputed many times. Speed up by handling them better
     v_rel_B = eci_to_sbc(q_BI).apply(v_atm_I - v_eci)
 
     v_rel_B_norm = np.linalg.norm(v_rel_B)
@@ -188,7 +190,7 @@ def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shad
 
         sn = np.dot(sun_dir, s.normal)
 
-        F += P * s.area * sn((1 - s.rho_s - s.rho_t) * sun_dir + (2 * s.rho_s * sn + 2/3 * s.rho_d) * s.normal)
+        F += P * s.area * sn *((1 - s.rho_s - s.rho_t) * sun_dir + (2 * s.rho_s * sn + 2/3 * s.rho_d) * s.normal)
         tau += np.cross(cop - s.center, F)
 
     return F, tau

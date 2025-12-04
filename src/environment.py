@@ -80,10 +80,10 @@ def atmosphere_density_msis(dt_utc: datetime.datetime, lat_deg: float, lon_deg: 
 
     """
 
-    datetimes = np.array([dt_utc], dtype="datetime64[s]")
+    # datetimes = np.array([dt_utc], dtype="datetime64[s]")
     alt_km = alt_m / 1000.0
 
-    result = pymsis.calculate(datetimes, lat_deg, lon_deg, alt_km, f107, f107a, ap)
+    result = pymsis.calculate(dt_utc, lat_deg, lon_deg, alt_km, f107, f107a, ap)
 
     rho_kg_m3 = result[:, 0].item(0)
 
@@ -124,6 +124,7 @@ def magnetic_field_vector(dt_utc: datetime.datetime, lat_deg: float, lon_deg: fl
 
     return (B_eci / np.linalg.norm(B_eci)) * B_tot
 
+#TODO: sun and moon position can be precomputed vectorized for time efficiency
 def sun_position(dt_utc: datetime.datetime) -> np.ndarray:
     """
     Calculates the Sun's position vector in the GCRS (ECI) frame.

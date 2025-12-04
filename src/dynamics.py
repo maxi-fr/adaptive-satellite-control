@@ -3,6 +3,7 @@ from astropy.coordinates import SkyCoord, CartesianRepresentation, TEME
 from astropy import units as u
 from sgp4.api import Satrec, WGS84
 from sgp4.conveniences import jday_datetime
+from sgp4.io import twoline2rv
 from astropy.time import Time
 import datetime
 from typing import Tuple
@@ -127,7 +128,8 @@ class SGP4:
 
         no_kozai = 2*np.pi / (24 * 60) * MM
 
-        satrec = Satrec.sgp4init(WGS84, "i", "69", epoch, B_star, 0.0, 0.0, e, np.deg2rad(arg_pe), np.deg2rad(i), np.deg2rad(M0), no_kozai, np.deg2rad(raan))
+        satrec = Satrec()
+        satrec.sgp4init(WGS84, "i", 25544, epoch, B_star, 0.0, 0.0, e, np.deg2rad(arg_pe), np.deg2rad(i), np.deg2rad(M0), no_kozai, np.deg2rad(raan))
 
         return cls(satrec)
 
@@ -151,16 +153,19 @@ class SGP4:
             An instance of the SGP4 class.
         """
         satrec = Satrec.twoline2rv(tle1, tle2, earth_grav)
+        # assert twoline2rv(tle1, tle2, earth_grav)
         return cls(satrec)
         
     
-    def propagate(self, t: datetime.datetime) -> Tuple[np.ndarray, np.ndarray]:
+    def propagate(self, time: list[datetime.datetime]|datetime.datetime) -> Tuple[np.ndarray, np.ndarray]:
         """
         Propagates the satellite orbit to a given time.
 
+        Note: make sure to call this function vectorized. It is much faster than inside a for loop
+        
         Parameters
         ----------
-        t : datetime.datetime
+        time : list[datetime.datetime] | datetime.datetime
             The time to which to propagate the orbit.
 
         Returns
@@ -168,12 +173,25 @@ class SGP4:
         Tuple[np.ndarray, np.ndarray]
             A tuple containing the ECI position [m] and velocity [m/s] vectors.
         """
-        jd, fr = jday_datetime(t)
-        error_code, r_TEME, v_TEME = self.satrec.sgp4(jd, fr)
-        assert error_code == 0
+        if isinstance(time, datetime.datetime):
+            time = [time]
 
-        teme = TEME(obstime=Time(t, format="datetime", scale="utc"))
-        r_ECI = SkyCoord(CartesianRepresentation(*r_TEME, unit=u.km), frame=teme, representation_type='cartesian').transform_to("gcrs").cartesian.xyz.to(u.m).value # type: ignore
-        v_ECI = SkyCoord(CartesianRepresentation(*v_TEME, unit=u.km), frame=teme, representation_type='cartesian').transform_to("gcrs").cartesian.xyz.to(u.m).value # type: ignore
+        jd = np.empty_like(time)
+        fr = np.empty_like(time)
+        for i, t in enumerate(time):
+            jd[i], fr[i] = jday_datetime(t)
 
-        return r_ECI, v_ECI  
+
+        error_code, r_TEME, v_TEME = self.satrec.sgp4_array(jd, fr)
+        assert np.all(error_code == 0)
+
+        r_TEME = np.atleast_2d(r_TEME)
+        v_TEME = np.atleast_2d(v_TEME)
+
+        teme = TEME(obstime=Time(time, format="datetime", scale="utc"))
+        r_ECI = SkyCoord(CartesianRepresentation(r_TEME[:, 0], r_TEME[:, 1], r_TEME[:, 2], unit=u.km), frame=teme, representation_type='cartesian').transform_to("gcrs").cartesian.xyz.to(u.m).value # type: ignore
+        v_ECI = SkyCoord(CartesianRepresentation(v_TEME[:, 0], v_TEME[:, 1], v_TEME[:, 2], unit=u.km), frame=teme, representation_type='cartesian').transform_to("gcrs").cartesian.xyz.to(u.m).value # type: ignore
+
+
+        return r_ECI.T.squeeze(), v_ECI.T.squeeze()
+  
