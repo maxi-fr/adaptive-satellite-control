@@ -268,7 +268,7 @@ class Surface:
         bool
             True if the ray passes through the surface, False otherwise.
         """
-        dn = abs(np.dot(direction, self.normal))
+        dn = np.dot(direction, self.normal)
 
         # ray is parallel
         if dn == 0:
@@ -281,36 +281,9 @@ class Surface:
 
         p = point + t * direction
 
-        p_xy = self.R_BS[:, :2] @ (p - self.center)
+        p_xy = self.R_BS[:, :2].T @ (p - self.center)
 
         return bool(np.all(np.abs(p_xy) <= np.array([self.x_half, self.x_half])))
-
-
-def center_of_pressure(surfaces: List["Surface"]) -> np.ndarray:
-    """
-    Calculates the geometric center of pressure for a collection of surfaces.
-
-    This is a simplified model that computes the area-weighted average of the
-    centers of the provided surfaces.
-
-    Parameters
-    ----------
-    surfaces : List[Surface]
-        A list of Surface objects.
-
-    Returns
-    -------
-    np.ndarray, shape (3,)
-        The calculated center of pressure vector [m].
-    """
-
-    # TODO: idk need a better center of pressure formula
-
-    A_tot = sum([s.area for s in surfaces])
-
-    cop = sum([s.area * s.center for s in surfaces]) / A_tot
-
-    return np.asarray(cop)
 
 
 def string_to_matrix(matrix_str: str) -> np.ndarray:

@@ -61,12 +61,12 @@ vel_arr = teme_to_gcrs(time, np.array(vel))
 
 qq_torque = to_datetime(pd.read_csv(r"EOS Sim Data\Sim2\gg_torque.CSV"))
 
-with open(os.path.join(os.path.dirname(config_imports.HERE), "tudsat-trace_eos.json"), "r") as f:
+with open(os.path.join(config_imports.PROJECT_DIR, "test", "tudsat-trace_eos.json"), "r") as f:
     eos_file = json.load(f)
 
 sim_init_data: dict = replace_orientation_matrices(eos_file)
 
-sim = Simulation.from_json(os.path.join(os.path.dirname(config_imports.HERE), "tudsat-trace_eos.json"))
+sim = Simulation.from_json(os.path.join(config_imports.PROJECT_DIR, "test", "tudsat-trace_eos.json"))
 sat = sim.sat
 
 q_BI_true = np.empty((len(time), 4))

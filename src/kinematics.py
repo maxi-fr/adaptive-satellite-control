@@ -25,10 +25,11 @@ def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
         Rotation object representing the transformation from ORC to ECI.
 
     """
-    o_3I = (- r / np.linalg.norm(r))[:, np.newaxis]
-    o_2I = (np.cross(v, o_3I) / np.linalg.norm(v))[:, np.newaxis]
-    o_1I = np.cross(o_2I, o_3I)[:, np.newaxis]
-    R_IO = R.from_matrix(np.hstack([o_1I, o_2I, o_3I]))
+    o_3I = (- r / np.linalg.norm(r))
+    o_2I = (np.cross(v, -o_3I) / np.linalg.norm(v))
+    o_1I = np.cross(o_2I, o_3I)
+    
+    R_IO = R.from_matrix(np.vstack([o_1I, o_2I, o_3I]).T)
     return R_IO
 
 def euler_ocr_to_sbc(roll_deg: float, pitch_deg: float, yaw_deg: float):

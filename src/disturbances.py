@@ -4,7 +4,7 @@ from environment import solar_radiation_pressure_constant
 from kinematics import orc_to_sbc, eci_to_sbc
 from typing import List
 
-from satellite import Surface, center_of_pressure
+from satellite import Surface
 
 # Earth constants
 R_EARTH = 6.378137e6  # Earth's equatorial radius in meters
@@ -142,8 +142,6 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, sur
         A tuple containing the total aerodynamic force [N] and torque [N*m] vectors in the body frame.
     """
 
-    cop = center_of_pressure(surfaces)
-
     v_atm_I = np.cross(OMEGA_E, r_eci)  # = np.array([OMEGA_E[2] * r_eci[1], OMEGA_E[2] * r_eci[0], 0])
 
     #TODO: rotations get recomputed many times. Speed up by handling them better
@@ -164,21 +162,19 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, sur
 
         F += rho * v_rel_B_norm**2 * s.area * cos_theta_i * (s.sigma_t * v_rel_B_norm +
                                                              (s.sigma_n * s.S + (2 - s.sigma_n - s.sigma_t) * cos_theta_i) * s.normal)
-        tau += np.cross(cop - s.center, F)
+        tau += np.cross(s.center, F)
 
     return F, tau
 
 
-def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shadow: bool, q_BI: np.ndarray, surfaces: List["Surface"]) -> tuple[np.ndarray, np.ndarray]:
-    
+def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shadow: bool, q_BI: np.ndarray, surfaces: List["Surface"]) -> tuple[np.ndarray, np.ndarray]:  
     if in_shadow:
         return np.zeros(3), np.zeros(3)
 
-    cop = center_of_pressure(surfaces)
-    P = solar_radiation_pressure_constant(r_eci, sun_pos_eci)
+    dist = sun_pos_eci - r_eci
+    P = solar_radiation_pressure_constant(dist)
 
-    sun_dir = eci_to_sbc(q_BI).apply(r_eci - sun_pos_eci)
-    sun_dir /= np.linalg.norm(sun_dir)
+    sun_dir = eci_to_sbc(q_BI).apply(dist / np.linalg.norm(dist))
 
     F = np.zeros(3)
     tau = np.zeros(3)
@@ -190,7 +186,7 @@ def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shad
 
         sn = np.dot(sun_dir, s.normal)
 
-        F += P * s.area * sn *((1 - s.rho_s - s.rho_t) * sun_dir + (2 * s.rho_s * sn + 2/3 * s.rho_d) * s.normal)
-        tau += np.cross(cop - s.center, F)
+        F += P * s.area * sn * ((1 - s.rho_s - s.rho_t) * sun_dir + (2 * s.rho_s * sn + 2/3 * s.rho_d) * s.normal)
+        tau += np.cross(s.center, F)
 
     return F, tau

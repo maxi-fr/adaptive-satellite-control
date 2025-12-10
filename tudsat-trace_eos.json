@@ -209,6 +209,59 @@
       "Position": "{X:-0.05, Y:0.05, Z:0.12}",
       "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:0.00000000, M22:-1.00000000, M23:0.00000000}, {M31:-1.00000000, M32:0.00000000, M33:0.00000000}}"
     },
+    "Antenna Panel 1": {
+        "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+        "DimX": 0.006,
+        "DimY": 0.1,
+        "NumSurfModelSegsX": 1,
+        "NumSurfModelSegsY": 1,
+        "HasHole": false,
+        "HoleX": 0.0,
+        "HoleY": 0.0,
+        "HoleRadius": 0.0,
+        "Position": "{X:0.05, Y:-0.05, Z:0.126}",
+        "Orientation":  "{{M11:-1.00000000, M12:0.00000000, M13:0.00000000}, {M21:0.00000000, M22:1.00000000, M23:0.00000000}, {M31:0.00000000, M32:0.00000000, M33:1.00000000}}"
+        },
+    "Antenna Panel 2": {
+        "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+        "DimX": 0.006,
+        "DimY": 0.1,
+        "NumSurfModelSegsX": 1,
+        "NumSurfModelSegsY": 1,
+        "HasHole": false,
+        "HoleX": 0.0,
+        "HoleY": 0.0,
+        "HoleRadius": 0.0,
+        "Position": "{X:0.05, Y:0.05, Z:0.126}",
+        "Orientation": "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:-1.00000000, M22:0.00000000, M23:0.00000000}, {M31:0.00000000, M32:1.00000000, M33:0.00000000}}"
+        },
+    "Antenna Panel 3": {
+        "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+        "DimX": 0.006,
+        "DimY": 0.1,
+        "NumSurfModelSegsX": 1,
+        "NumSurfModelSegsY": 1,
+        "HasHole": false,
+        "HoleX": 0.0,
+        "HoleY": 0.0,
+        "HoleRadius": 0.0,
+        "Position": "{X:-0.05, Y:0.05, Z:0.126}",
+        "Orientation":  "{{M11:0.00000000, M12:0.00000000, M13:-1.00000000}, {M21:0.00000000, M22:-1.00000000, M23:0.00000000}, {M31:-1.00000000, M32:0.00000000, M33:0.00000000}}"
+        },
+
+    "Antenna Panel 4": {
+        "$type": "Eos.Models.Satellite.CubeSatLibrary.CoverPanel, CubeSatLibrary",
+        "DimX": 0.006,
+        "DimY": 0.1,
+        "NumSurfModelSegsX": 1,
+        "NumSurfModelSegsY": 1,
+        "HasHole": false,
+        "HoleX": 0.0,
+        "HoleY": 0.0,
+        "HoleRadius": 0.0,
+        "Position": "{X:0.05, Y:-0.05, Z:0.12}",
+        "Orientation":  "{{M11:0.00000000, M12:0.00000000, M13:1.00000000}, {M21:-1.00000000, M22:0.00000000, M23:0.00000000}, {M31:0.00000000, M32:-1.00000000, M33:0.00000000}}"
+        },
     "Magnetometer1": {
       "$type": "Eos.Models.Satellite.CubeSpaceLibrary.CubeMagDeploy, CubeSpaceEosLibrary",
       "Orientation": "{{M11:0.00000000, M12:-1.00000000, M13:0.00000000}, {M21:0.00000000, M22:0.00000000, M23:1.00000000}, {M31:-1.00000000, M32:0.00000000, M33:0.00000000}}",

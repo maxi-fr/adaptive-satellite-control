@@ -27,7 +27,7 @@ def to_datetime(eos_data: pd.DataFrame):
     return eos_data.set_index("Datetime", inplace=False)
 
 
-eos_data_raw = pd.read_csv(os.path.join(os.path.dirname(config_imports.HERE), r"test\EOS Sim Data\Sim1\sat_kinematic_state.CSV"))
+eos_data_raw = pd.read_csv(os.path.join(config_imports.PROJECT_DIR, r"test\EOS Sim Data\Sim1\sat_kinematic_state.CSV"))
 
 
 eos_data = eos_data_raw.drop(columns=["M11", "M12", "M13", "M21", "M22", "M23", "M31", "M32", "M33", 'M11.1', 'M12.1', 'M13.1', 'M21.1',
@@ -43,7 +43,7 @@ pos_arr  = teme_to_gcrs(time, pos.to_numpy())
 vel_arr = teme_to_gcrs(time, vel.to_numpy())
 
 
-with open(os.path.join(os.path.dirname(config_imports.HERE), "tudsat-trace_eos.json"), "r") as f:
+with open(os.path.join(config_imports.PROJECT_DIR,  "tudsat-trace_eos.json"), "r") as f:
     eos_file = json.load(f)
 
 sim_init_data: dict = replace_orientation_matrices(eos_file)

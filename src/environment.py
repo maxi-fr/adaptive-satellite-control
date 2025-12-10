@@ -165,16 +165,14 @@ def moon_position(dt_utc: datetime.datetime) -> np.ndarray:
 
     return moon.cartesian.xyz.to(u.m).value # type: ignore
     
-def solar_radiation_pressure_constant(r_eci: np.ndarray, sun_pos_eci: np.ndarray) -> float:
+def solar_radiation_pressure_constant(dist: np.ndarray) -> float:
     """
     Calculates the solar radiation pressure at the satellite's location.
 
     Parameters
     ----------
-    r_eci : np.ndarray, shape (3,)
-        Satellite position vector in the ECI frame [m].
-    sun_pos_eci : np.ndarray, shape (3,)
-        Sun position vector in the ECI frame [m].
+    dist : np.ndarray, shape (3,)
+        Distance vector from the satellite to the Sun [m].
 
     Returns
     -------
@@ -184,8 +182,6 @@ def solar_radiation_pressure_constant(r_eci: np.ndarray, sun_pos_eci: np.ndarray
 
     P_1AU = 4.56e-6  # Solar radiation pressure at 1 AU [N/m^2]
     AU_M = 149597870700.0  # 1 Astronomical Unit in meters
-
-    dist = np.asarray(sun_pos_eci) - np.asarray(r_eci)
 
     return float(P_1AU * (AU_M / np.linalg.norm(dist))**2) #FIXME: maybe wrong formula
 
