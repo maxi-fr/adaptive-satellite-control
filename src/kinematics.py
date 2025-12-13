@@ -1,11 +1,8 @@
 from scipy.spatial.transform import Rotation as R
 import numpy as np
-
-from astropy.time import Time
-from astropy.coordinates import EarthLocation, SkyCoord
+from astropy.coordinates import EarthLocation
 import astropy.units as u
 import numpy as np
-import casadi as ca
 
 
 def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
@@ -88,20 +85,7 @@ def eci_to_geodedic(pos_eci: np.ndarray) -> tuple[float, float, float]:
 
     return lat, lon, alt
 
-
-def quaternion_product(qa: np.ndarray, qb: np.ndarray):
-    q_ret = np.empty(4)
-
-    q_ret[:3] = qb[3]*qa[:3] + qa[3]*qb[:3] + np.cross(qa[:3], qb[:3])
-    q_ret[3] = qa[3]*qb[3] - np.dot(qa[:3], qb[:3])
-
-    return q_ret
-
-def quaternion_rotation(q, x):
-
-    return quaternion_product(q1, quaternion_product(q2, q3))
-
-def quaternion_kinematics(q_BI: np.ndarray, omega: np.ndarray) -> np.ndarray:
+def quaternion_kinematics(q: np.ndarray, omega: np.ndarray) -> np.ndarray:
     """
     Compute the derivative of the quaternion. Using the scalar last convention: q_BI = [qx, qy, qz, qw]
     
@@ -120,8 +104,8 @@ def quaternion_kinematics(q_BI: np.ndarray, omega: np.ndarray) -> np.ndarray:
     """
     q_ret = np.empty(4)
 
-    q_ret[:3] = 0.5 * (omega * q_BI[3] + np.cross(omega, q_BI[:3]))
-    q_ret[3] = -0.5 * np.dot(omega, q_BI[:3])
+    q_ret[:3] = 0.5 * (omega * q[3] + np.cross(omega, q[:3]))
+    q_ret[3] = -0.5 * np.dot(omega, q[:3])
 
     return q_ret
 

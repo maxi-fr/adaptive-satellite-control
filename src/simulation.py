@@ -22,7 +22,7 @@ class Simulation:
         self.tf = tf
 
         self.sat = sat
-        self.inital_state = np.zeros(13)
+        self.inital_state = np.zeros(22)
         self.inital_state[:3] = initial_r_ECI
         self.inital_state[3:6] = initial_v_ECI
 
@@ -83,9 +83,8 @@ class Simulation:
         state = self.inital_state
         t = self.t0
         u = np.zeros(6)
-        
-        total_steps = int((self.tf - self.t0).total_seconds() / self.dt.total_seconds())
-        with tqdm(total=total_steps, desc="Running Simulation") as pbar:
+
+        with tqdm(total=(self.tf - self.t0).total_seconds()/60, desc="Simulation time", unit="sim min") as pbar:
             while t < self.tf:
     
                 k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor get get current measurements. k1 is passed to integration step, to avoid recomputation 
@@ -109,17 +108,17 @@ class Simulation:
                 # logging 
                 # TODO: maybe log to different files. 
                 # Because it could get alot with all different variables: states, measured states, estimated states, environment variables
-                with open(self.log_file, 'a') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([t] + list(state))
+                # with open(self.log_file, 'a') as f:
+                #     writer = csv.writer(f)
+                #     writer.writerow([t] + list(state))
      
                 # integrate world dynamics (envrionment, orbit, attitude, sensors, actuators)
-                u = np.vstack((u_rw, u_mag))
+                u = np.concat((u_rw, u_mag))
                 next_state = rk4_step(self.world_dynamics, state, u, t, self.dt, k1)
     
                 t += self.dt
                 state = next_state
-                pbar.update(1)
+                pbar.update(self.dt.total_seconds()/60)
 
     def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime, update_sensors: bool = False):
         """
@@ -177,10 +176,10 @@ class Simulation:
         d_v = self.sat.orbit_dynamics(r_eci, np.zeros(3), F_aero + F_SRP + F_third + F_grav)
         d_q = quaternion_kinematics(q_BI, omega)
         d_omega = self.sat.attitude_dynamics(omega, h_rw, tau_mag - tau_rw, tau_gg + tau_aero + tau_SRP)
-        d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i]) for i, rw in enumerate(self.sat.rws)])
+        d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i]) for i, rw in enumerate(self.sat.rws)]).T
         d_curr_mag = np.array([mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)]) 
 
-        dx = np.vstack((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
+        dx = np.concat((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
 
         if update_sensors:
             self.sat.sun_sensor.measure(t, sun_pos)
@@ -193,7 +192,7 @@ class Simulation:
 
         return dx
 
-# TODO: maybe implement a variable step size integrator. RK45 (EOS uses simple rk4)
+
 def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray], 
              x: np.ndarray, u: np.ndarray, t: datetime.datetime, dt: datetime.timedelta, k1: np.ndarray|None = None) -> np.ndarray:
     """
@@ -229,3 +228,14 @@ def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray
     k3 = f(x + 0.5 * dt_float * k2, u, t + 0.5 * dt)
     k4 = f(x + dt_float * k3, u, t + dt)
     return x + (dt_float/ 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+
+if __name__ == "__main__":
+    eos_file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tudsat-trace_eos.json")
+    
+    sim = Simulation.from_json(eos_file_path)
+
+    sim.tf = sim.t0 + datetime.timedelta(hours=1)
+    sim.dt = datetime.timedelta(seconds=1)
+
+    sim.run()

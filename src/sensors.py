@@ -13,7 +13,7 @@ class Sensor(ABC):
 
         self.period = datetime.timedelta(seconds=1/frequency).total_seconds()
 
-        self.last_measurement = datetime.datetime(datetime.MINYEAR, 1, 1)
+        self.last_measurement = datetime.datetime(datetime.MINYEAR, 1, 1, tzinfo=datetime.timezone.utc)
 
         return False
 
@@ -160,6 +160,7 @@ class GPS(Sensor):
 
         self.sigma_sq = sigma_sq
         self.sat_pos = np.zeros(3)
+
 
     def measure(self, t: datetime.datetime, sat_pos: np.ndarray): # type: ignore
         dt = (t - self.last_measurement).total_seconds()
