@@ -145,7 +145,7 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, sur
     v_atm_I = np.cross(OMEGA_E, r_eci)  # = np.array([OMEGA_E[2] * r_eci[1], OMEGA_E[2] * r_eci[0], 0])
 
     #TODO: rotations get recomputed many times. Speed up by handling them better
-    v_rel_B = eci_to_sbc(q_BI).apply(v_atm_I - v_eci)
+    v_rel_B = eci_to_sbc(q_BI).apply(v_atm_I + v_eci)
 
     v_rel_B_norm = np.linalg.norm(v_rel_B)
     v_rel_B_unit = v_rel_B / v_rel_B_norm
@@ -154,14 +154,13 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, sur
     tau = np.zeros(3)
 
     for s in surfaces:
-
-        if s.self_occlusion(v_rel_B, surfaces):
-            continue
-
         cos_theta_i = np.dot(v_rel_B_unit, s.normal)
 
-        F += rho * v_rel_B_norm**2 * s.area * cos_theta_i * (s.sigma_t * v_rel_B_norm +
-                                                             (s.sigma_n * s.S + (2 - s.sigma_n - s.sigma_t) * cos_theta_i) * s.normal)
+        if cos_theta_i < 0:
+            continue
+
+        F -= rho * v_rel_B_norm**2 * s.area * cos_theta_i * (s.sigma_t * v_rel_B_unit +
+                                                            (s.sigma_n * s.S + (2 - s.sigma_n - s.sigma_t) * cos_theta_i) * s.normal)
         tau += np.cross(s.center, F)
 
     return F, tau
@@ -171,7 +170,7 @@ def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shad
     if in_shadow:
         return np.zeros(3), np.zeros(3)
 
-    dist = sun_pos_eci - r_eci
+    dist = sun_pos_eci - r_eci # spacecraft to sun vector
     P = solar_radiation_pressure_constant(dist)
 
     sun_dir = eci_to_sbc(q_BI).apply(dist / np.linalg.norm(dist))
@@ -180,13 +179,13 @@ def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shad
     tau = np.zeros(3)
 
     for s in surfaces:
-
-        if s.self_occlusion(sun_dir, surfaces):
+        cos_theta_i = np.dot(sun_dir, s.normal)
+        
+        if cos_theta_i < 0:
             continue
 
-        sn = np.dot(sun_dir, s.normal)
-
-        F += P * s.area * sn * ((1 - s.rho_s - s.rho_t) * sun_dir + (2 * s.rho_s * sn + 2/3 * s.rho_d) * s.normal)
+        F -= P * s.area * cos_theta_i * ((1 - s.rho_s - s.rho_t) * sun_dir + (2 * s.rho_s * cos_theta_i + 2/3 * s.rho_d) * s.normal)
+        
         tau += np.cross(s.center, F)
 
     return F, tau
