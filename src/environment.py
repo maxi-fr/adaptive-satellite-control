@@ -120,11 +120,11 @@ def magnetic_field_vector(dt_utc: datetime.datetime, lat_deg: float, lon_deg: fl
 
     B_ecef = pymap3d.ned2ecef(Bn, Be, Bv, lat_deg, lon_deg, alt_m, pymap3d.Ellipsoid.from_name("wgs84"))
 
-    B_eci = np.asarray(pymap3d.ecef2eci(*B_ecef, time=dt_utc))
+    B_eci = np.asarray(pymap3d.ecef2eci(*B_ecef, time=dt_utc)) #TODO: takes most of the computation time 
 
     return (B_eci / np.linalg.norm(B_eci)) * B_tot
 
-#TODO: sun and moon position can be precomputed vectorized for time efficiency
+
 def sun_position(dt_utc: datetime.datetime) -> np.ndarray:
     """
     Calculates the Sun's position vector in the GCRS (ECI) frame.

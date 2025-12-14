@@ -8,13 +8,15 @@ import numpy as np
 from dynamics import SGP4
 import environment as env
 import disturbances as dis
-from kinematics import euler_ocr_to_sbc, orc_to_eci, orc_to_sbc, quaternion_kinematics, eci_to_geodedic
-from satellite import Spacecraft, replace_orientation_matrices, string_to_matrix
+from kinematics import eci_to_sbc, euler_ocr_to_sbc, orc_to_eci, orc_to_sbc, quaternion_kinematics, eci_to_geodedic
+from satellite import Spacecraft, string_to_matrix
 from tqdm import tqdm
+
+from utils import Logger, PiecewiseConstant, floor_time_to_minute, replace_orientation_matrices
 
 
 class Simulation:
-    def __init__(self, sat: Spacecraft, initial_r_ECI: np.ndarray, initial_v_ECI: np.ndarray, initial_attitude_BO: R, initial_ang_vel_B: np.ndarray, log_file: str,
+    def __init__(self, sat: Spacecraft, initial_r_ECI: np.ndarray, initial_v_ECI: np.ndarray, initial_attitude_BO: R, initial_ang_vel_B: np.ndarray,
                  dt: datetime.timedelta, t0: datetime.datetime, tf: datetime.datetime):
 
         self.t0 = t0
@@ -33,20 +35,22 @@ class Simulation:
         if initial_ang_vel_B is not None:
             self.inital_state[10:13] = initial_ang_vel_B
 
-        # log_file = log_file[:4]
-        # if os.path.exists(log_file):
-        #     for i in range(1000):
-        #         if not os.path.exists(log_file + "_" + str(i) + ".csv"):
-        #             log_file = log_file + "_" + str(i)
-        #             break
+        self.log_folder = "Simulation_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        if not os.path.exists(self.log_folder):
+            os.makedirs(self.log_folder)
 
-        self.log_file = log_file
+        self.state_logger = Logger(os.path.join(self.log_folder, "state.csv"), ['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
+                            'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
+                             'omega_rw_1', 'omega_rw_2', 'omega_rw_3',
+                             'i_rw_1', 'i_rw_2', 'i_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3'])
+        
+        self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"), ['t', 'u_rw_1', 'u_rw_2', 'u_rw_3', 'u_mag_1', 'u_mag_2', 'u_mag_3'])
 
-        # with open(self.log_file, 'w') as f:
-        #     writer = csv.writer(f)
-        #     writer.writerow(['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
-        #                     'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
-        #                      'omega_rw', 'tau_rw', 'i_mag'])
+
+        # Sun and moon position change very slowly. For performance a new value is only calculated every minute
+        self.sun_position = PiecewiseConstant(fn=env.sun_position, time_bucket_fn=floor_time_to_minute)
+        self.moon_position = PiecewiseConstant(fn=env.moon_position, time_bucket_fn=floor_time_to_minute)
+
             
     @classmethod
     def from_json(cls, eos_file_path: str) -> "Simulation":
@@ -77,7 +81,7 @@ class Simulation:
         orbit_model = SGP4.from_tle(tle1, tle2)
         r_ECI, v_ECI = orbit_model.propagate(t0)
 
-        return cls(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, "Log_file.csv", dt, t0, tf)
+        return cls(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, dt, t0, tf)
 
     def run(self):
         state = self.inital_state
@@ -106,12 +110,11 @@ class Simulation:
                 u_mag = np.zeros(3)
                 
                 # logging 
-                # TODO: maybe log to different files. 
-                # Because it could get alot with all different variables: states, measured states, estimated states, environment variables
-                # with open(self.log_file, 'a') as f:
-                #     writer = csv.writer(f)
-                #     writer.writerow([t] + list(state))
-     
+                self.state_logger.log([t] + list(state))
+                self.input_logger.log([t] + list(u))
+                # log controller, estimator vals and so on
+
+    
                 # integrate world dynamics (envrionment, orbit, attitude, sensors, actuators)
                 u = np.concat((u_rw, u_mag))
                 next_state = rk4_step(self.world_dynamics, state, u, t, self.dt, k1)
@@ -119,6 +122,7 @@ class Simulation:
                 t += self.dt
                 state = next_state
                 pbar.update(self.dt.total_seconds()/60)
+        
 
     def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime, update_sensors: bool = False):
         """
@@ -152,21 +156,22 @@ class Simulation:
         u_mag = u[:3]
         u_rw = u[3:6]
 
+        R_BO = orc_to_sbc(q_BI, r_eci, v_eci)
+        R_BI = eci_to_sbc(q_BI)
         lat, lon, alt = eci_to_geodedic(r_eci)
 
         # algebraic relations
         rho = env.atmosphere_density_msis(t, lat, lon, alt)
         B = env.magnetic_field_vector(t, lat, lon, alt)
-        sun_pos = env.sun_position(t)
+        sun_pos: np.ndarray = self.sun_position(t) #type: ignore
         in_shadow = env.is_in_shadow(r_eci, sun_pos)
-        moon_pos = env.moon_position(t)
+        moon_pos: np.ndarray = self.moon_position(t) #type: ignore
 
-        #TODO: rotations B->O and B->I get recomputed many times. Speed up by handling them better
         F_grav = dis.non_spherical_gravity_forces(r_eci, self.sat.m)
         F_third = dis.third_body_forces(r_eci, self.sat.m, sun_pos, moon_pos)
-        tau_gg = dis.gravity_gradient(r_eci, v_eci, q_BI, self.sat.J_B)
-        F_aero, tau_aero = dis.aerodynamic_drag(r_eci, v_eci, q_BI, self.sat.surfaces, rho)
-        F_SRP, tau_SRP = dis.solar_radiation_pressure(r_eci, sun_pos, in_shadow, q_BI, self.sat.surfaces)
+        tau_gg = dis.gravity_gradient(r_eci, R_BO, self.sat.J_B)
+        F_aero, tau_aero = dis.aerodynamic_drag(r_eci, v_eci, R_BI, self.sat.surfaces, rho)
+        F_SRP, tau_SRP = dis.solar_radiation_pressure(r_eci, sun_pos, in_shadow, R_BI, self.sat.surfaces)
 
         tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega)) for i, rw in enumerate(self.sat.rws)]) # type: ignore
         tau_mag = sum([np.array(mag.torque(mag_curr[i], B)) for i, mag in enumerate(self.sat.mag)])

@@ -1,10 +1,10 @@
 
 import numpy as np
 from environment import solar_radiation_pressure_constant
-from kinematics import orc_to_sbc, eci_to_sbc
+from scipy.spatial.transform import Rotation as R
 from typing import List
 
-from satellite import Surface
+from utils import Surface
 
 # Earth constants
 R_EARTH = 6.378137e6  # Earth's equatorial radius in meters
@@ -87,7 +87,7 @@ def third_body_forces(r_eci: np.ndarray, m: float, sun_pos_eci: np.ndarray, moon
     return a * m
 
 
-def gravity_gradient(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, J_B: np.ndarray) -> np.ndarray:
+def gravity_gradient(r_eci: np.ndarray, R_BO: R, J_B: np.ndarray) -> np.ndarray:
     """
     Calculates the gravity gradient torque on a satellite.
 
@@ -95,10 +95,9 @@ def gravity_gradient(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, J_B
     ----------
     r_eci : np.ndarray, shape (3,)
         Position vector in the ECI frame [m].
-    v_eci : np.ndarray, shape (3,)
-        Velocity vector in the ECI frame [m/s].
-    q_BI : np.ndarray, shape (4,)
-        Attitude quaternion [w, x, y, z] from ECI to the body frame.
+    R_BO : scipy.spatial.transform.Rotation
+        Rotation from the orbital reference frame (ORC) to the body frame (B).
+
     J_B : np.ndarray, shape (3, 3)
         Inertia tensor of the satellite in the body frame [kg*m^2].
 
@@ -108,7 +107,7 @@ def gravity_gradient(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, J_B
         The gravity gradient torque vector in the body frame [N*m].
     """
 
-    nadir_body_axis = orc_to_sbc(q_BI, r_eci, v_eci).apply(np.array([0, 0, 1]))
+    nadir_body_axis = R_BO.apply(np.array([0, 0, 1]))
 
     gg_torque = (3 * MU) / np.linalg.norm(np.atleast_2d(r_eci), axis=1, keepdims=True)**3 * np.cross(nadir_body_axis, np.matvec(J_B, nadir_body_axis))
 
@@ -118,7 +117,7 @@ def gravity_gradient(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, J_B
 # rad/s earth rotates about the z axis of the eci frame with angular velocity OMEGA_E
 OMEGA_E = np.array([0, 0, 0.000_072_921_158_553])
 
-def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, surfaces: List[Surface], rho: float) -> tuple[np.ndarray, np.ndarray]:
+def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, R_BI: R, surfaces: List[Surface], rho: float) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculates the aerodynamic drag force and torque on the satellite.
 
@@ -129,8 +128,8 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, sur
     ----------
     v_eci : np.ndarray, shape (3,)
         Velocity of the satellite in the eci frame [m/s].
-    q_BI : np.ndarray, shape (4,)
-        Attitude quaternion [w, x, y, z] from ECI to the body frame.
+    R_BI : scipy.spatial.transfrom.Rotation
+        Rotation from the inertial frame (I) to the body frame (B).
     surfaces : List[Surface]
         A list of Surface objects representing the satellite's geometry.
     rho : float
@@ -144,8 +143,7 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, sur
 
     v_atm_I = np.cross(OMEGA_E, r_eci)  # = np.array([OMEGA_E[2] * r_eci[1], OMEGA_E[2] * r_eci[0], 0])
 
-    #TODO: rotations get recomputed many times. Speed up by handling them better
-    v_rel_B = eci_to_sbc(q_BI).apply(v_atm_I + v_eci)
+    v_rel_B = R_BI.apply(v_atm_I + v_eci)
 
     v_rel_B_norm = np.linalg.norm(v_rel_B)
     v_rel_B_unit = v_rel_B / v_rel_B_norm
@@ -166,14 +164,14 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, q_BI: np.ndarray, sur
     return F, tau
 
 
-def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shadow: bool, q_BI: np.ndarray, surfaces: List["Surface"]) -> tuple[np.ndarray, np.ndarray]:  
+def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shadow: bool, R_BI: R, surfaces: List["Surface"]) -> tuple[np.ndarray, np.ndarray]:  
     if in_shadow:
         return np.zeros(3), np.zeros(3)
 
     dist = sun_pos_eci - r_eci # spacecraft to sun vector
     P = solar_radiation_pressure_constant(dist)
 
-    sun_dir = eci_to_sbc(q_BI).apply(dist / np.linalg.norm(dist))
+    sun_dir = R_BI.apply(dist / np.linalg.norm(dist))
 
     F = np.zeros(3)
     tau = np.zeros(3)
