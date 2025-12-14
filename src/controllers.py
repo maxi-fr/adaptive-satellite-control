@@ -1,6 +1,7 @@
 import casadi as ca
 import numpy as np
 from typing import List
+from kinematics import quaternion_product as quat_prod_np
 
 def integrator(f: ca.Function, x: ca.SX, u: ca.SX, dt: ca.SX) -> ca.SX:
     """
@@ -72,6 +73,20 @@ def quaternion_rotation() -> ca.Function:
     return ca.Function("quaternion_rotation", [q, x], [x_ret])
 quat_rot: ca.Function = quaternion_rotation()
 
+def _attitude_error_vec(q_ref: np.ndarray, q_est: np.ndarray) -> np.ndarray:
+    q_ref = np.asarray(q_ref, dtype=float).reshape(4)
+    q_est = np.asarray(q_est, dtype=float).reshape(4)
+
+    q_est_conj = q_est.copy()
+    q_est_conj[:3] *= -1.0
+
+    q_err = quat_prod_np(q_ref, q_est_conj)
+    if q_err[3] < 0:
+        q_err = -q_err
+    e_q = 2.0 * q_err[:3]
+
+    return e_q
+
 
 def build_kinematics() -> ca.Function:
     """
@@ -141,9 +156,13 @@ def build_rotational_dynamics(J_hat: np.ndarray, J_w: np.ndarray, A_hat: np.ndar
     total_torque = tau_mag - tau_rw - cross_term
     omega_dot = ca.solve(J_hat, total_torque)
 
-    return ca.Function("f_rot", [q_BI, omega, u_rw, u_mag, omega_w, B_B], [omega_dot], ["q_BI", "omega", "u", "omega_w", "B_B"], ["omega_dot"])
-
-
+    return ca.Function(
+        "f_rot",
+        [q_BI, omega, u_rw, u_mag, omega_w, B_B],
+        [omega_dot],
+        ["q_BI", "omega", "u_rw", "u_mag", "omega_w", "B_B"],
+        ["omega_dot"],
+    )
 
 def build_wheel_dynamics(J_w: np.ndarray, A_hat: np.ndarray) -> ca.Function:
     """
@@ -207,8 +226,13 @@ def build_system_dynamics(J_hat: np.ndarray, J_w: np.ndarray, A_hat: np.ndarray,
 
     dx = ca.vertcat(d_q_BI, d_omega, d_omega_w)
 
-    return ca.Function("system_dynamics", [x, u, B_B], [dx], ["x", "u", "p"], ["dx"])
-
+    return ca.Function(
+        "system_dynamics",
+        [x, u, B_B],
+        [dx],
+        ["x", "u", "B_B"],
+        ["dx"],
+    )
 
 def build_ekf_process_model():
     """
@@ -239,4 +263,31 @@ def build_ekf_process_model():
 
     dx = ca.vertcat(dq, dbias)
 
-    return ca.Function("ekf_dynamics", [x], [dx], ["x", "u", "p"], ["dx"])
+    return ca.Function("ekf_dynamics", [x], [dx], ["x"], ["dx"])
+
+def simple_rw_mag_controller(
+    q_est: np.ndarray,
+    omega_est: np.ndarray,
+    q_ref: np.ndarray,
+    omega_ref: np.ndarray,
+    Kp_q: float,
+    Kd_w: float,
+    K_t_rw: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    q_est = np.asarray(q_est, dtype=float).reshape(4)
+    q_ref = np.asarray(q_ref, dtype=float).reshape(4)
+    omega_est = np.asarray(omega_est, dtype=float).reshape(3)
+    omega_ref = np.asarray(omega_ref, dtype=float).reshape(3)
+
+    # error of attitude and angular velocity
+    e_q = _attitude_error_vec(q_ref, q_est)
+    e_w = omega_est - omega_ref
+    # body moment that we want
+    tau_cmd = -Kp_q * e_q - Kd_w * e_w
+    # map
+    K_t_rw = float(K_t_rw)
+    u_rw = tau_cmd / K_t_rw   # current to 3 wheels
+    # magnetorquers turned off for now
+    u_mag = np.zeros(3)
+
+    return u_rw, u_mag
