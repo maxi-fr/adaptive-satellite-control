@@ -49,16 +49,38 @@ class Spacecraft:
         J_B = string_to_matrix(trace["StructureMomentOfInertia"])
 
         surfaces = [Surface.from_eos_panel(v) for k, v in data["ModelObjects"].items() if "panel" in k.lower()]
-        rws = [ReactionWheel(0.2e-3, 6000, 2e-6, a) for a in [[1, 0, 0], [0, 1, 0], [0, 0, 1]]]
-        magnetorquers = [Magnetorquer(0.2e-2, a) for a in [[1, 0, 0], [0, 1, 0], [0, 0, 1]]]
+        # Reaction Wheels
+        RW_MAX_TORQUE = 2e-3  # [N·m]
+        RW_MAX_RPM = 6000  # [rpm]
+        RW_INERTIA = 2.82e-6  # [kg·m^2]
+        rws = [
+            ReactionWheel(RW_MAX_TORQUE, RW_MAX_RPM, RW_INERTIA, [-1, 0, 0]),  # -X
+            ReactionWheel(RW_MAX_TORQUE, RW_MAX_RPM, RW_INERTIA, [0, 1, 0]),  # +Y
+            ReactionWheel(RW_MAX_TORQUE, RW_MAX_RPM, RW_INERTIA, [0, 0, 1]),  # +Z
+        ]
+        # Magnetorquers
+        MTQ_XY = 0.3  # [A·m^2]  CR0003
+        MTQ_Z = 0.2  # [A·m^2]  CR0002
+        magnetorquers = [
+            Magnetorquer(MTQ_XY, [-1, 0, 0]),  # -X
+            Magnetorquer(MTQ_XY, [0, 1, 0]),  # +Y
+            Magnetorquer(MTQ_Z, [0, 0, 1]),  # +Z
+        ]
+        # Sensor sampling frequencies [Hz]
+        GYRO_FREQUENCY = 10.0
+        MAG_FREQUENCY = 2.0
+        SUN_FREQUENCY = 1.0
+        GPS_FREQUENCY = 0.2
+        ACC_FREQUENCY = 10.0
+        RW_TACHO_FREQ = 5.0
 
-        dt = 0.01
-        sun_sensor = SunSensor(dt, 0.0)
-        magnetometer = Magnetometer(dt, 0.0, np.array([0, 0, 0]))
-        gps = GPS(dt, 0.0)
-        accelerometer = Accelerometer(dt, 0.0, 0.0)
-        gyro = Gyroscope(dt, 0.0, 0.0)
-        rw_speed_sensors = [RW_tachometer(dt, 0.0) for _ in rws]
+        # Sensors
+        sun_sensor = SunSensor(SUN_FREQUENCY, sigma_sq=0.0)
+        magnetometer = Magnetometer(MAG_FREQUENCY, sigma_sq=0.0, const_bias=np.zeros(3))
+        gps = GPS(GPS_FREQUENCY, sigma_sq=0.0)
+        accelerometer = Accelerometer(ACC_FREQUENCY, sigma_sq=0.0, bias_sigma_sq=0.0)
+        gyro = Gyroscope(GYRO_FREQUENCY, sigma_sq=0.0, bias_sigma_sq=0.0)
+        rw_speed_sensors = [RW_tachometer(RW_TACHO_FREQ, sigma_sq=0.0) for _ in rws]
 
         return cls(m, J_B, surfaces, rws, magnetorquers, sun_sensor, magnetometer, gps, accelerometer, gyro, rw_speed_sensors)
         
