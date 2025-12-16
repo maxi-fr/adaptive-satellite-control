@@ -29,23 +29,28 @@ class Simulation:
         self.inital_state[3:6] = initial_v_ECI
 
         # R_BI = R_BO * (R_IO)^-1
-        self.inital_state[6:10] = (initial_attitude_BO * orc_to_eci(self.inital_state[0:3], self.inital_state[3:6]).inv()
-                            ).as_quat(scalar_first=False)  # quaternion representing rotation from ECI to Body Frame
+        self.inital_state[6:10] = (initial_attitude_BO * orc_to_eci(self.inital_state[0:3],
+                                                                    self.inital_state[3:6]).inv()
+                                  ).as_quat(scalar_first=False)  # quaternion representing rotation from ECI to Body Frame
         
         if initial_ang_vel_B is not None:
             self.inital_state[10:13] = initial_ang_vel_B
 
+        # ===== info log =====
         self.log_folder = "Simulation_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         if not os.path.exists(self.log_folder):
             os.makedirs(self.log_folder)
-
-        self.state_logger = Logger(os.path.join(self.log_folder, "state.csv"), ['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
+        self.state_logger = Logger(os.path.join(self.log_folder, "state.csv"), 
+                        ['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
                             'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
                              'omega_rw_1', 'omega_rw_2', 'omega_rw_3',
                              'i_rw_1', 'i_rw_2', 'i_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3'])
-        
-        self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"), ['t', 'u_rw_1', 'u_rw_2', 'u_rw_3', 'u_mag_1', 'u_mag_2', 'u_mag_3'])
-
+        self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"), 
+                    ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3'])
+        self.quat_logger = Logger(
+            os.path.join(self.log_folder, "quat.csv"),
+            ['t', 'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'q_norm', 'omega_norm']
+        )
 
         # Sun and moon position change very slowly. For performance a new value is only calculated every minute
         self.sun_position = PiecewiseConstant(fn=env.sun_position, time_bucket_fn=floor_time_to_minute)
@@ -106,19 +111,31 @@ class Simulation:
                 state_est = state
     
                 # TODO: controllers
-                u_rw = np.zeros(3)
                 u_mag = np.zeros(3)
-                
-                # logging 
-                self.state_logger.log([t] + list(state))
-                self.input_logger.log([t] + list(u))
-                # log controller, estimator vals and so on
+                u_rw = np.zeros(3)
 
-    
-                # integrate world dynamics (envrionment, orbit, attitude, sensors, actuators)
-                u = np.concat((u_rw, u_mag))
+                # integrate world dynamics
+                u = np.concatenate((u_mag, u_rw))
                 next_state = rk4_step(self.world_dynamics, state, u, t, self.dt, k1)
-    
+
+                # quaternion normalization (x,y,z,w)
+                q = next_state[6:10]
+                qn = np.linalg.norm(q)
+                if qn == 0:
+                    raise ValueError("Quaternion norm became zero.")
+                q = q / qn
+                next_state[6:10] = q
+
+                # normalizing omega
+                omega_norm = float(np.linalg.norm(next_state[10:13]))
+                # logging (after normalization)
+                self.state_logger.log([t + self.dt] + list(next_state))
+                self.input_logger.log([t + self.dt] + list(u))
+                self.quat_logger.log([t + self.dt,
+                                      q[0], q[1], q[2], q[3],
+                                      float(np.linalg.norm(q)),
+                                      omega_norm])
+
                 t += self.dt
                 state = next_state
                 pbar.update(self.dt.total_seconds()/60)
@@ -184,7 +201,7 @@ class Simulation:
         d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i]) for i, rw in enumerate(self.sat.rws)]).T
         d_curr_mag = np.array([mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)]) 
 
-        dx = np.concat((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
+        dx = np.concatenate((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
 
         if update_sensors:
             self.sat.sun_sensor.measure(t, sun_pos)
