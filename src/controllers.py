@@ -234,36 +234,6 @@ def build_system_dynamics(J_hat: np.ndarray, J_w: np.ndarray, A_hat: np.ndarray,
         ["dx"],
     )
 
-def build_ekf_process_model():
-    """
-    Builds the symbolic dynamics model for the Extended Kalman Filter (EKF).
-
-    This function defines the state-space model dx/dt = f(x, u, p) for the EKF,
-    where the state `x` includes the quaternion, angular velocity, and reaction wheel speeds,
-    and the parameters `p` include the magnetic field vector.
-
-    Returns
-    -------
-    ca.Function
-        A CasADi function `f(x, p) -> dx`.
-    """
-    # Define symbolic variables for the EKF state and inputs
-    q_BI = ca.SX.sym('q_BI', 4)
-    omega = ca.SX.sym('omega', 3)
-    
-    bias = ca.SX.sym('bias', 3)
-
-    f_kin = build_kinematics()
-
-    dq = f_kin(q_BI, omega - bias)
-
-    dbias = ca.SX.zeros(3)
-
-    x = ca.vertcat(q_BI, bias)
-
-    dx = ca.vertcat(dq, dbias)
-
-    return ca.Function("ekf_dynamics", [x], [dx], ["x"], ["dx"])
 
 def simple_rw_mag_controller(
     q_est: np.ndarray,

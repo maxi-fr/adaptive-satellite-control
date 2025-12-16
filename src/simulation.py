@@ -47,10 +47,6 @@ class Simulation:
                              'i_rw_1', 'i_rw_2', 'i_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3'])
         self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"), 
                     ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3'])
-        self.quat_logger = Logger(
-            os.path.join(self.log_folder, "quat.csv"),
-            ['t', 'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'q_norm', 'omega_norm']
-        )
 
         # Sun and moon position change very slowly. For performance a new value is only calculated every minute
         self.sun_position = PiecewiseConstant(fn=env.sun_position, time_bucket_fn=floor_time_to_minute)
@@ -96,7 +92,7 @@ class Simulation:
         with tqdm(total=(self.tf - self.t0).total_seconds()/60, desc="Simulation time", unit="sim min") as pbar:
             while t < self.tf:
     
-                k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor get get current measurements. k1 is passed to integration step, to avoid recomputation 
+                k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor to get current measurements. k1 is passed to integration step, to avoid recomputation 
                 
                 # Flight software (FSW)
                 sun_mea = self.sat.sun_sensor.read(t)
@@ -114,27 +110,13 @@ class Simulation:
                 u_mag = np.zeros(3)
                 u_rw = np.zeros(3)
 
-                # integrate world dynamics
+                self.state_logger.log([t] + list(state))
+                self.input_logger.log([t] + list(u))
+
                 u = np.concatenate((u_mag, u_rw))
                 next_state = rk4_step(self.world_dynamics, state, u, t, self.dt, k1)
 
-                # quaternion normalization (x,y,z,w)
-                q = next_state[6:10]
-                qn = np.linalg.norm(q)
-                if qn == 0:
-                    raise ValueError("Quaternion norm became zero.")
-                q = q / qn
-                next_state[6:10] = q
-
-                # normalizing omega
-                omega_norm = float(np.linalg.norm(next_state[10:13]))
-                # logging (after normalization)
-                self.state_logger.log([t + self.dt] + list(next_state))
-                self.input_logger.log([t + self.dt] + list(u))
-                self.quat_logger.log([t + self.dt,
-                                      q[0], q[1], q[2], q[3],
-                                      float(np.linalg.norm(q)),
-                                      omega_norm])
+                next_state[6:10] /= np.linalg.norm(next_state[6:10]) # normalize quaternion
 
                 t += self.dt
                 state = next_state
