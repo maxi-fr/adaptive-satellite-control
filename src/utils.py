@@ -11,35 +11,42 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial.transform import Rotation as R
 
 
-
 class Logger:
     def __init__(self, log_file: str, header: list[str]):
-        log_file_base = log_file.split(".")[0]
-        if os.path.exists(log_file):
+        base = log_file.rsplit(".", 1)[0]
+        ext = ".csv"
+        candidate = base + ext
+
+        if os.path.exists(candidate):
             for i in range(1000):
-                log_file_base = log_file_base + "_" + str(i)
-                if not os.path.exists(log_file_base + ".csv"):
+                candidate = f"{base}_{i}{ext}"
+                if not os.path.exists(candidate):
                     break
 
-        self.log_file = open(log_file_base + ".csv", 'a', buffering=8192)
+        self.log_file = open(candidate, "a", buffering=8192, newline="")
         self.csv_writer = csv.writer(self.log_file)
         self.csv_writer.writerow(header)
-
         self.row_len = len(header)
 
+    def log(self, row: list):
+        # ochrana: nech ti to nehádže tiché bordely do CSV
+        if len(row) != self.row_len:
+            raise ValueError(f"Logger: expected {self.row_len} columns, got {len(row)}")
 
-    def log(self, data: list):
-        if len(data) != self.row_len:
-            raise ValueError("Data length does not match header length")
-        self.csv_writer.writerow(data)
+        self.csv_writer.writerow(row)
+
+        # aby si po páde nestratil celý buffer (8192B) – voliteľné, ale praktické
+        self.log_file.flush()
 
     def close(self):
-        self.log_file.close()
+        if not self.log_file.closed:
+            self.log_file.close()
 
     def __del__(self):
-        self.close()
-
-
+        try:
+            self.close()
+        except Exception:
+            pass
 
 class Surface:
     """
@@ -125,8 +132,15 @@ class Surface:
                         [-1.00000000, 0.00000000, 0.00000000]]"
         }
         """
-        R_BS = np.asarray(dict["Orientation"]).T   # idk why the transpose is needed 
-        
+        R_BS = np.asarray(
+            dict["Orientation"]).T  # EOS often gives the orientation as rows; we want a matrix with axes in columns
+
+        # sanity check: needs to be a rotation matrix
+        if not np.allclose(R_BS.T @ R_BS, np.eye(3), atol=1e-6):
+            raise ValueError("Surface.from_eos_panel: Orientation matrix is not orthonormal after transpose.")
+        if np.linalg.det(R_BS) < 0.0:
+            raise ValueError(
+                "Surface.from_eos_panel: Orientation matrix has det < 0 (reflection), expected proper rotation.")
 
         return cls(dict["Position"], dict.get("DimX", 0.1), dict.get("DimY", 0.1), R_BS)
 
@@ -304,3 +318,5 @@ class PiecewiseConstant:
 
 def floor_time_to_minute(t: datetime.datetime) -> datetime.datetime:
     return t.replace(second=0, microsecond=0)
+def floor_time_to_second(t: datetime.datetime) -> datetime.datetime:
+    return t.replace(microsecond=0)

@@ -1,10 +1,10 @@
 import datetime
 import json
 import os
-import csv
 from typing import Callable
 from scipy.spatial.transform import Rotation as R
 import numpy as np
+
 from dynamics import SGP4
 import environment as env
 import disturbances as dis
@@ -12,7 +12,7 @@ from kinematics import eci_to_sbc, euler_ocr_to_sbc, orc_to_eci, orc_to_sbc, qua
 from satellite import Spacecraft, string_to_matrix
 from tqdm import tqdm
 
-from utils import Logger, PiecewiseConstant, floor_time_to_minute, replace_orientation_matrices
+from utils import Logger, PiecewiseConstant, floor_time_to_minute, floor_time_to_second, replace_orientation_matrices
 
 
 class Simulation:
@@ -31,8 +31,16 @@ class Simulation:
         # R_BI = R_BO * (R_IO)^-1
         self.inital_state[6:10] = (initial_attitude_BO * orc_to_eci(self.inital_state[0:3],
                                                                     self.inital_state[3:6]).inv()
-                                  ).as_quat(scalar_first=False)  # quaternion representing rotation from ECI to Body Frame
-        
+                                  ).as_quat(scalar_first=False)
+                                   # quaternion representing rotation from ECI to Body Frame
+
+        self.enable_disturbance_torques = True
+        self.enable_disturbance_forces = True
+        # use these two together enable actuators and freeze actuator states
+        self.enable_actuators = True
+        self.freeze_actuator_states = False
+        self.freeze_body_rates = False
+
         if initial_ang_vel_B is not None:
             self.inital_state[10:13] = initial_ang_vel_B
 
@@ -47,16 +55,25 @@ class Simulation:
                              'i_rw_1', 'i_rw_2', 'i_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3'])
         self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"), 
                     ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3'])
-        self.quat_logger = Logger(
-            os.path.join(self.log_folder, "quat.csv"),
-            ['t', 'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'q_norm', 'omega_norm']
-        )
 
         # Sun and moon position change very slowly. For performance a new value is only calculated every minute
         self.sun_position = PiecewiseConstant(fn=env.sun_position, time_bucket_fn=floor_time_to_minute)
         self.moon_position = PiecewiseConstant(fn=env.moon_position, time_bucket_fn=floor_time_to_minute)
 
-            
+        # Heavy(ish) environment calls, cache them at 1 Hz for speed
+        self.atmosphere_density = PiecewiseConstant(
+            fn=lambda tt: env.atmosphere_density_msis(tt, *self._cached_lat_lon_alt),
+            time_bucket_fn=floor_time_to_second
+        )
+        self.magnetic_field = PiecewiseConstant(
+            fn=lambda tt: env.magnetic_field_vector(tt, *self._cached_lat_lon_alt),
+            time_bucket_fn=floor_time_to_second
+        )
+
+        # helper storage for the lambda above (updated each dynamics call)
+        self._cached_lat_lon_alt = (0.0, 0.0, 0.0)
+
+
     @classmethod
     def from_json(cls, eos_file_path: str) -> "Simulation":
         with open(eos_file_path, "r") as f:
@@ -65,7 +82,17 @@ class Simulation:
         data: dict = replace_orientation_matrices(eos_file)  # type: ignore
 
         settings = data["Settings"] # type: ignore
-        t0 = datetime.datetime.fromisoformat(settings["SimulationStart"]+"Z")
+        start = settings["SimulationStart"]
+
+        # If there's a "Z", change to +00:00, so the fromisoformat can always handle it
+        if isinstance(start, str) and start.endswith("Z"):
+            start = start[:-1] + "+00:00"
+
+        t0 = datetime.datetime.fromisoformat(start)
+
+        # If there's going to be a time without timezone, forcefully take it as UTC
+        if t0.tzinfo is None:
+            t0 = t0.replace(tzinfo=datetime.timezone.utc)
 
         dt_ = tuple(map(float, settings["SimulationPeriod"].split(":")))
         dt = datetime.timedelta(hours=dt_[0], minutes=dt_[1], seconds=dt_[2])
@@ -91,34 +118,44 @@ class Simulation:
     def run(self):
         state = self.inital_state
         t = self.t0
+
+        # "u" is input applied during step[t, t+dt)
         u = np.zeros(6)
 
-        with tqdm(total=(self.tf - self.t0).total_seconds()/60, desc="Simulation time", unit="sim min") as pbar:
+        with tqdm(total=(self.tf - self.t0).total_seconds() / 60, desc="Simulation time", unit="sim min") as pbar:
             while t < self.tf:
-    
-                k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor get get current measurements. k1 is passed to integration step, to avoid recomputation 
-                
-                # Flight software (FSW)
+
+                # 1) Sensor update in time
+                k1 = self.world_dynamics(state, u, t,
+                        update_sensors=True)  # necessary for sensors to get current measurements
+
+                # 2) FSW: measurement reading
                 sun_mea = self.sat.sun_sensor.read(t)
-                mag_mea =self.sat.magnetometer.read(t)
+                mag_mea = self.sat.magnetometer.read(t)
                 gps_mea = self.sat.gps.read(t)
                 acc_mea = self.sat.accelerometer.read(t)
                 gyro_mea = self.sat.gyro.read(t)
                 omega_rw_mea = [rw.read(t) for rw in self.sat.rw_speed_sensors]
-    
+
                 # TODO: estimators
                 sun_pos_est = sun_mea
                 state_est = state
-    
-                # TODO: controllers
+
+                # TODO: controllers (zatiaľ nulové)
                 u_mag = np.zeros(3)
                 u_rw = np.zeros(3)
 
-                # integrate world dynamics
+                # 3) making "u" for this step
                 u = np.concatenate((u_mag, u_rw))
+
+                # 4) LOG "pre-step"
+                self.state_logger.log([t] + list(state))
+                self.input_logger.log([t] + list(u))
+
+                # 5) Integration to t+dt
                 next_state = rk4_step(self.world_dynamics, state, u, t, self.dt, k1)
 
-                # quaternion normalization (x,y,z,w)
+                # 6) safe quaternion normalization
                 q = next_state[6:10]
                 qn = np.linalg.norm(q)
                 if qn == 0:
@@ -126,20 +163,10 @@ class Simulation:
                 q = q / qn
                 next_state[6:10] = q
 
-                # normalizing omega
-                omega_norm = float(np.linalg.norm(next_state[10:13]))
-                # logging (after normalization)
-                self.state_logger.log([t + self.dt] + list(next_state))
-                self.input_logger.log([t + self.dt] + list(u))
-                self.quat_logger.log([t + self.dt,
-                                      q[0], q[1], q[2], q[3],
-                                      float(np.linalg.norm(q)),
-                                      omega_norm])
-
+                # 7) time shift
                 t += self.dt
                 state = next_state
-                pbar.update(self.dt.total_seconds()/60)
-        
+                pbar.update(self.dt.total_seconds() / 60)
 
     def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime, update_sensors: bool = False):
         """
@@ -175,11 +202,14 @@ class Simulation:
 
         R_BO = orc_to_sbc(q_BI, r_eci, v_eci)
         R_BI = eci_to_sbc(q_BI)
+
         lat, lon, alt = eci_to_geodedic(r_eci)
 
-        # algebraic relations
-        rho = env.atmosphere_density_msis(t, lat, lon, alt)
-        B = env.magnetic_field_vector(t, lat, lon, alt)
+        # update cached geo for 1 Hz environment lookup
+        self._cached_lat_lon_alt = (lat, lon, alt)
+        rho = self.atmosphere_density(t)  # cached at 1 Hz
+        B = self.magnetic_field(t)  # cached at 1 Hz
+
         sun_pos: np.ndarray = self.sun_position(t) #type: ignore
         in_shadow = env.is_in_shadow(r_eci, sun_pos)
         moon_pos: np.ndarray = self.moon_position(t) #type: ignore
@@ -190,16 +220,38 @@ class Simulation:
         F_aero, tau_aero = dis.aerodynamic_drag(r_eci, v_eci, R_BI, self.sat.surfaces, rho)
         F_SRP, tau_SRP = dis.solar_radiation_pressure(r_eci, sun_pos, in_shadow, R_BI, self.sat.surfaces)
 
+        if self.enable_disturbance_torques is False:
+            tau_gg = np.zeros(3)
+            tau_aero = np.zeros(3)
+            tau_SRP = np.zeros(3)
+        if self.enable_disturbance_forces is False:
+            F_grav = np.zeros(3)
+            F_third = np.zeros(3)
+            F_aero = np.zeros(3)
+            F_SRP = np.zeros(3)
+
         tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega)) for i, rw in enumerate(self.sat.rws)]) # type: ignore
         tau_mag = sum([np.array(mag.torque(mag_curr[i], B)) for i, mag in enumerate(self.sat.mag)])
+
+        if self.enable_actuators is False:
+            tau_rw = np.zeros(3)
+            h_rw = np.zeros(3)
+            tau_mag = np.zeros(3)
 
         # differential equations
         d_r = v_eci
         d_v = self.sat.orbit_dynamics(r_eci, np.zeros(3), F_aero + F_SRP + F_third + F_grav)
         d_q = quaternion_kinematics(q_BI, omega)
         d_omega = self.sat.attitude_dynamics(omega, h_rw, tau_mag - tau_rw, tau_gg + tau_aero + tau_SRP)
+        if self.freeze_body_rates is True:
+            d_omega = np.zeros(3)
         d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i]) for i, rw in enumerate(self.sat.rws)]).T
-        d_curr_mag = np.array([mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)]) 
+        d_curr_mag = np.array([mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)])
+
+        if self.freeze_actuator_states is True:
+            d_omega_rw = np.zeros(3)
+            d_curr_rw = np.zeros(3)
+            d_curr_mag = np.zeros(3)
 
         dx = np.concatenate((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
 
@@ -257,7 +309,7 @@ if __name__ == "__main__":
     
     sim = Simulation.from_json(eos_file_path)
 
-    sim.tf = sim.t0 + datetime.timedelta(hours=1)
-    sim.dt = datetime.timedelta(seconds=1)
+    sim.tf = sim.t0 + datetime.timedelta(hours = 1)
+    sim.dt = datetime.timedelta(seconds = 0.1)
 
     sim.run()
