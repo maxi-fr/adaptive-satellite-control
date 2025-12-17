@@ -83,7 +83,7 @@ def atmosphere_density_msis(dt_utc: datetime.datetime, lat_deg: float, lon_deg: 
     # datetimes = np.array([dt_utc], dtype="datetime64[s]")
     alt_km = alt_m / 1000.0
 
-    result = pymsis.calculate(dt_utc, lat_deg, lon_deg, alt_km, f107, f107a, ap)
+    result = pymsis.calculate(dt_utc, lat_deg, lon_deg, alt_km, f107, f107a, ap) #type: ignore
 
     rho_kg_m3 = result[:, 0].item(0)
 
@@ -210,12 +210,3 @@ def is_in_shadow(r_eci: np.ndarray, sun_pos_eci: np.ndarray) -> bool:
     sun_position_unit = sun_pos_eci / np.linalg.norm(sun_pos_eci)
     return np.dot(r_eci, sun_position_unit) < - np.sqrt(np.linalg.norm(r_eci)**2 - E_RADIUS_M**2)
 
-
-
-if __name__ == "__main__":
-    print(atmosphere_density_static(500))
-    print(atmosphere_density_msis(datetime.datetime.now(), 40, -73, 500_000))
-
-    magnetic_field_vector(datetime.datetime.now(), 40, -73, 500_000)
-
-    sun_position(datetime.datetime.now())

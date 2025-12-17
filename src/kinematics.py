@@ -32,9 +32,25 @@ def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
     R_IO = R.from_matrix(np.vstack([o_1I, o_2I, o_3I]).T)
     return R_IO
 
-def euler_ocr_to_sbc(roll_deg: float, pitch_deg: float, yaw_deg: float):
+def euler_ocr_to_sbc(roll_deg: float, pitch_deg: float, yaw_deg: float) -> R:
     """
-    TODO
+    Creates a Rotation object from Euler angles (Roll, Pitch, Yaw).
+
+    The rotation sequence is defined as Y-X-Z (Pitch-Roll-Yaw).
+
+    Parameters
+    ----------
+    roll_deg : float
+        Roll angle [deg].
+    pitch_deg : float
+        Pitch angle [deg].
+    yaw_deg : float
+        Yaw angle [deg].
+
+    Returns
+    -------
+    scipy.spatial.transform.Rotation
+        Rotation object representing the transformation from ORC to SBC.
     """
 
     R_BO = R.from_euler('yxz', [pitch_deg, roll_deg, yaw_deg], degrees=True)
@@ -70,14 +86,35 @@ def orc_to_sbc(q_BI: np.ndarray, r_eci: np.ndarray, v_eci: np.ndarray) -> R:
 
 
 def eci_to_sbc(q_BI: np.ndarray) -> R:
+    """
+    Creates a Rotation object from the attitude quaternion.
 
+    Parameters
+    ----------
+    q_BI : np.ndarray
+        Attitude quaternion [qx, qy, qz, qw] (scalar last) representing the rotation
+        from the ECI frame to the Body frame.
+
+    Returns
+    -------
+    scipy.spatial.transform.Rotation
+        Rotation object representing the transformation from ECI to SBC.
+    """
     return R.from_quat(q_BI, scalar_first=False)
 
 def eci_to_geodedic(pos_eci: np.ndarray) -> tuple[float, float, float]:
     """
-    pos_eci [x, y, z] in meters, 
-    return deg, deg, m
-    
+    Converts ECI position to geodetic coordinates.
+
+    Parameters
+    ----------
+    pos_eci : np.ndarray
+        Position vector in the ECI frame [m].
+
+    Returns
+    -------
+    tuple[float, float, float]
+        A tuple containing (latitude [deg], longitude [deg], altitude [m]).
     """
     
     loc = EarthLocation.from_geocentric(*(pos_eci*u.m)).to_geodetic("WGS84") # type: ignore
@@ -94,7 +131,7 @@ def quaternion_kinematics(q: np.ndarray, omega: np.ndarray) -> np.ndarray:
     
     Parameters
     ----------
-    q_BI : np.ndarray, shape (4,)
+    q : np.ndarray, shape (4,)
         Current attitude quaternion [qx, qy, qz, qw].
     omega : np.ndarray, shape (3,)
         Angular velocity of the body frame with respect to the inertial frame 
@@ -111,5 +148,3 @@ def quaternion_kinematics(q: np.ndarray, omega: np.ndarray) -> np.ndarray:
     q_ret[3] = -0.5 * np.dot(omega, q[:3])
 
     return q_ret
-
-

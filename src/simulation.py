@@ -8,6 +8,7 @@ import numpy as np
 from dynamics import SGP4
 import environment as env
 import disturbances as dis
+from estimators import AttitudeEKF
 from kinematics import eci_to_sbc, euler_ocr_to_sbc, orc_to_eci, orc_to_sbc, quaternion_kinematics, eci_to_geodedic
 from satellite import Spacecraft, string_to_matrix
 from tqdm import tqdm
@@ -47,6 +48,9 @@ class Simulation:
                              'i_rw_1', 'i_rw_2', 'i_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3'])
         self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"), 
                     ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3'])
+        
+        self.att_ekf = AttitudeEKF(q0=self.inital_state[6:10], b0=self.inital_state[10:13], P0=np.eye(6), Qc=np.eye(6),
+                                   R_sun=np.eye(3), R_mag=np.eye(3))
 
         # Sun and moon position change very slowly. For performance a new value is only calculated every minute
         self.sun_position = PiecewiseConstant(fn=env.sun_position, time_bucket_fn=floor_time_to_minute)
@@ -90,21 +94,32 @@ class Simulation:
         u = np.zeros(6)
 
         with tqdm(total=(self.tf - self.t0).total_seconds()/60, desc="Simulation time", unit="sim min") as pbar:
-            while t < self.tf:
+            while t <= self.tf:
     
                 k1 = self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensor to get current measurements. k1 is passed to integration step, to avoid recomputation 
                 
                 # Flight software (FSW)
-                sun_mea = self.sat.sun_sensor.read(t)
-                mag_mea =self.sat.magnetometer.read(t)
-                gps_mea = self.sat.gps.read(t)
-                acc_mea = self.sat.accelerometer.read(t)
-                gyro_mea = self.sat.gyro.read(t)
-                omega_rw_mea = [rw.read(t) for rw in self.sat.rw_speed_sensors]
+                sun_mea, new_sun_mea = self.sat.sun_sensor.read(t)
+                mag_mea, new_mag_mea =self.sat.magnetometer.read(t)
+                gps_mea, new_gps_mea = self.sat.gps.read(t)
+                acc_mea, new_acc_mea = self.sat.accelerometer.read(t)
+                gyro_mea, new_gyro_mea = self.sat.gyro.read(t)
+                omega_rw_mea, new_omega_rw_mea = [rw.read(t) for rw in self.sat.rw_speed_sensors]
     
-                # TODO: estimators
-                sun_pos_est = sun_mea
-                state_est = state
+                self.orbital_estimator.pedict(t) 
+                self.att_ekf.predict(t, gyro_mea)
+
+                if new_gps_mea:
+                    self.orbital_estimator.update_gps(t, gps_mea)
+                r_eci_est, v_eci_est = self.orbital_estimator.get_state()
+                
+                if new_sun_mea:
+                    self.att_ekf.update_sun(t, sun_mea)
+                if new_mag_mea:
+                    self.att_ekf.update_mag(t, mag_mea, r_eci_est)
+
+                
+                state_est = self.att_ekf.get_state()
     
                 # TODO: controllers
                 u_mag = np.zeros(3)

@@ -48,21 +48,18 @@ def non_spherical_gravity_forces(r_eci: np.ndarray, m: float) -> np.ndarray:
     MU_r = MU / r**2
     RE_r = R_EARTH / r
 
-    # J2 acceleration
     factor_J2 = -1.5 * J2 * MU_r * RE_r**2
     term_J2 = 1 - 5 * z_r2
     a_J2 = factor_J2 * np.array([term_J2 * x_r,
                                  term_J2 * y_r,
                                  (3 - 5 * z_r2) * z_r])
 
-    # J3 acceleration
     factor_J3 = -0.5 * J3 * MU_r * RE_r**3
     term_J3_xy = 5 * (7 * z_r3 - 3 * z_r)
     a_J3 = factor_J3 * np.array([term_J3_xy * x_r,
                                  term_J3_xy * y_r,
                                  3 * (10 * z_r2 - (35/3) * z_r4 - 1)])
 
-    # J4 acceleration
     factor_J4 = -0.625 * J4 * MU_r * RE_r**4
     term_J4_xy = 3 - 42 * z_r2 + 63 * z_r4
     a_J4 = factor_J4 * np.array([term_J4_xy * x_r,
@@ -76,9 +73,27 @@ def non_spherical_gravity_forces(r_eci: np.ndarray, m: float) -> np.ndarray:
 # Gravitational parameters (m^3 / s^2)
 MU_SUN = 1.32712440018e20    # standard GM of Sun
 MU_MOON = 4.9048695e12       # standard GM of Moon
-def third_body_forces(r_eci: np.ndarray, m: float, sun_pos_eci: np.ndarray, moon_pos_eci: np.ndarray):
+def third_body_forces(r_eci: np.ndarray, m: float, sun_pos_eci: np.ndarray, moon_pos_eci: np.ndarray) -> np.ndarray:
+    """
+    Calculates the gravitational disturbance forces from the Sun and Moon.
 
-    a = 0
+    Parameters
+    ----------
+    r_eci : np.ndarray
+        Position vector of the satellite in the ECI frame [m].
+    m : float
+        Mass of the satellite [kg].
+    sun_pos_eci : np.ndarray
+        Position vector of the Sun in the ECI frame [m].
+    moon_pos_eci : np.ndarray
+        Position vector of the Moon in the ECI frame [m].
+
+    Returns
+    -------
+    np.ndarray
+        The total third-body disturbance force vector in the ECI frame [N].
+    """
+    a = np.zeros(3)
     for mu, r_third in zip([MU_SUN, MU_MOON], [sun_pos_eci, moon_pos_eci]):
 
         dist = r_third - r_eci
@@ -126,9 +141,11 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, R_BI: R, surfaces: Li
 
     Parameters
     ----------
-    v_eci : np.ndarray, shape (3,)
-        Velocity of the satellite in the eci frame [m/s].
-    R_BI : scipy.spatial.transfrom.Rotation
+    r_eci : np.ndarray
+        Position vector of the satellite in the ECI frame [m].
+    v_eci : np.ndarray
+        Velocity of the satellite in the ECI frame [m/s].
+    R_BI : scipy.spatial.transform.Rotation
         Rotation from the inertial frame (I) to the body frame (B).
     surfaces : List[Surface]
         A list of Surface objects representing the satellite's geometry.
@@ -164,14 +181,35 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, R_BI: R, surfaces: Li
     return F, tau
 
 
-def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shadow: bool, R_BI: R, surfaces: List["Surface"]) -> tuple[np.ndarray, np.ndarray]:  
+def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shadow: bool, R_BI: R, surfaces: List[Surface]) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Calculates the solar radiation pressure force and torque on the satellite.
+
+    Parameters
+    ----------
+    r_eci : np.ndarray
+        Position vector of the satellite in the ECI frame [m].
+    sun_pos_eci : np.ndarray
+        Position vector of the Sun in the ECI frame [m].
+    in_shadow : bool
+        Flag indicating if the satellite is in Earth's shadow.
+    R_BI : scipy.spatial.transform.Rotation
+        Rotation from the inertial frame (I) to the body frame (B).
+    surfaces : List[Surface]
+        A list of Surface objects representing the satellite's geometry.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        A tuple containing the total SRP force [N] and torque [N*m] vectors in the body frame.
+    """
     if in_shadow:
         return np.zeros(3), np.zeros(3)
 
-    dist = sun_pos_eci - r_eci # spacecraft to sun vector
-    P = solar_radiation_pressure_constant(dist)
+    sc_to_sun = sun_pos_eci - r_eci 
+    P = solar_radiation_pressure_constant(sc_to_sun)
 
-    sun_dir = R_BI.apply(dist / np.linalg.norm(dist))
+    sun_dir = R_BI.apply(sc_to_sun / np.linalg.norm(sc_to_sun))
 
     F = np.zeros(3)
     tau = np.zeros(3)

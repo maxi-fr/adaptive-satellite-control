@@ -166,3 +166,4 @@ class AttitudeEKF:
     # accessor (returns the copy of the quaternion, bias and covariance)
     def get_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         return self.q.copy(), self.b.copy(), self.P.copy()
+    
