@@ -199,8 +199,8 @@ class Simulation:
 
         lat, lon, alt = eci_to_geodedic(r_eci)
 
-        rho = self.atmosphere_density(t, lat, lon, alt)  #type: ignore
-        B = self.magnetic_field(t, lat, lon, alt)  #type: ignore
+        rho: float = self.atmosphere_density(t, lat, lon, alt)  #type: ignore
+        B: np.ndarray = self.magnetic_field(t, lat, lon, alt)  #type: ignore
 
         sun_pos: np.ndarray = self.sun_position(t) #type: ignore
         in_shadow = env.is_in_shadow(r_eci, sun_pos)

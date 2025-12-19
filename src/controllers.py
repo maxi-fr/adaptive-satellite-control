@@ -1,7 +1,7 @@
 import casadi as ca
 import numpy as np
-from typing import List
-from kinematics import quaternion_product as quat_prod_np
+from typing import Callable, List
+import control as ct
 
 def integrator(f: ca.Function, x: ca.SX, u: ca.SX, dt: ca.SX) -> ca.SX:
     """
@@ -61,11 +61,13 @@ def quaternion_rotation() -> ca.Function:
         A CasADi function with signature `f(q, x) -> x_ret`.
     """
     q = ca.SX.sym('q', 4)
+    q_conj = ca.SX.sym('q_conj', 4)
+
     x_vec_4 = ca.SX.sym('vec', 4)
     x = x_vec_4[:3]
     x_vec_4[3] = 0
 
-    q_conj = q.copy()
+    q_conj[:3] = q[:3]
     q_conj[3] = -q[3]
 
     x_ret = quat_prod(quat_prod(q, x_vec_4), q_conj)[:3]
@@ -261,3 +263,158 @@ def simple_rw_mag_controller(
     u_mag = np.zeros(3)
 
     return u_rw, u_mag
+
+
+
+def jacobian_no_seeds(f):
+    """
+    Wrap CasADi's Jacobian function so that seed inputs are hidden.
+    Returns a callable that only requires the original inputs.
+    """
+    jac_f = f.jacobian()
+
+    n_in = f.n_in()
+    n_out = f.n_out()
+
+    def wrapped(*args):
+        assert len(args) == n_in
+
+        # Evaluate outputs to infer correct seed shapes
+        outs = f(*args)
+
+        # Ensure tuple output
+        if n_out == 1:
+            outs = (outs,)
+
+        # Zero seeds for each output
+        seeds = [ca.DM.zeros(o.size()) for o in outs]
+
+        return jac_f(*args, *seeds)
+
+    return wrapped
+
+def split_jacobian_x_u(f):
+    """
+    Given f(x, u), return two functions:
+      - f_jac_x(x, u): Jacobian wrt x
+      - f_jac_u(x, u): Jacobian wrt u
+    """
+    assert f.n_in() == 2, "f must have exactly two inputs (x, u)"
+
+    jac_f = f.jacobian()
+
+    def _zero_seeds(x_val, u_val):
+        outs = f(x_val, u_val)
+        if f.n_out() == 1:
+            outs = (outs,)
+        return [ca.DM.zeros(o.size()) for o in outs]
+
+    def f_jac_x(x_val, u_val):
+        seeds = _zero_seeds(x_val, u_val)
+        jac_blocks = jac_f(x_val, u_val, *seeds)
+
+        # Blocks are ordered: (out1_x, out1_u, out2_x, out2_u, ...)
+        return tuple(jac_blocks[::2])
+
+    def f_jac_u(x_val, u_val):
+        seeds = _zero_seeds(x_val, u_val)
+        jac_blocks = jac_f(x_val, u_val, *seeds)
+
+        return tuple(jac_blocks[1::2])
+
+    return f_jac_x, f_jac_u
+
+class GainScheduling:
+
+    def __init__(self, f: ca.Function, f_jac_x: ca.Function, f_jac_u: ca.Function, 
+                 x_rho: Callable[[np.ndarray], np.ndarray], w_rho: Callable[[np.ndarray], np.ndarray], 
+                 u_rho: Callable[[np.ndarray], np.ndarray], 
+                 rho: List[np.ndarray], calc_scheduling_param: Callable[[np.ndarray], np.ndarray],
+                 Q: List[np.ndarray]|np.ndarray, R: List[np.ndarray]|np.ndarray):
+        
+        self.operating_points = [(x_rho(p), u_rho(p), w_rho(p)) for p in rho]
+        self.rho = np.stack([np.atleast_1d(p) for p in rho], axis=0)
+        self.calc_scheduling_param = calc_scheduling_param
+
+        self.f = f
+
+        self.Q = Q if isinstance(Q, list) else [Q] * len(self.operating_points)
+        self.R = R if isinstance(R, list) else [R] * len(self.operating_points)
+
+        # for x, u, w in self.operating_points:
+        #     print(f"Operating Point: x={x}, u={u}, w={w}")
+
+        self.linear_models = [(f_jac_x(x, u), f_jac_u(x, u)) for x, u, w in self.operating_points]
+
+        #self.place_gains = [ct.place(np.array(A).squeeze(), np.array(B).squeeze(), P[i]) for i, (A, B) in enumerate(self.linear_models)]
+        self.lqr_gains = [ct.lqr(np.squeeze(A), np.squeeze(B), self.Q[i], self.R[i])[0] for i, (A, B) in enumerate(self.linear_models)] # type: ignore
+
+    def closest_operating_points(self, beta):
+        i, j = np.argsort(np.linalg.norm(self.rho - beta, axis=1))[:2]
+
+        return i, j
+
+
+    def calc_input_cmds(self, w, x, *args):
+        beta = self.calc_scheduling_param(x, *args)
+
+        i, j = self.closest_operating_points(beta)
+
+        delta_u_i = np.dot(self.lqr_gains[i], ((w - self.operating_points[i][2]) - (x - self.operating_points[i][0])))
+        delta_u_j = np.dot(self.lqr_gains[j], ((w - self.operating_points[j][2]) - (x - self.operating_points[j][0])))
+
+        alpha = np.dot(self.rho[i] - self.rho[j], beta - self.rho[j]) / np.linalg.norm(self.rho[i] - self.rho[j])
+
+        delta_u = delta_u_i * alpha + (1-alpha) * delta_u_j
+
+        u_i = self.operating_points[i][1]
+        
+        u = delta_u + u_i
+
+        return u
+
+if __name__ == "__main__":
+
+    x = ca.SX.sym("x", 2)
+    dx = ca.SX.sym("dx", 2)
+    u = ca.SX.sym("u")
+    p = ca.SX.sym("p")
+
+    dx = - x**3 + np.ones(2)*u
+    f = ca.Function("f", [x, u], [dx], ["x", "u"], ["dx"])
+
+    f_jac_x = ca.Function("f_jac_x", [x, u], [ca.jacobian(dx, x)], ["x", "u"], ["jac_x"])
+    f_jac_u = ca.Function("f_jac_u", [x, u], [ca.jacobian(dx, u)], ["x", "u"], ["jac_u"])
+
+
+    rho = np.arange(-2, 3)
+
+    u_rho = lambda p: p # ca.Function("u_rho", [p], [p], ["rho"], ["u"])
+    x_rho = lambda p: np.array((np.sign(p)*np.abs(p)**(1/3), np.sign(p)*np.abs(p)**(1/3))) # ca.Function("x_rho", [p], [ca.sign(p)*ca.fabs(p)**(1/3), ca.sign(p)*ca.fabs(p)**(1/3)], ["rho"], ["x1", "x2"])
+    w_rho = lambda p : ca.sign(p)*ca.fabs(p)**(1/3) # ca.Function("w_rho", [p], [ca.sign(p)*ca.fabs(p)**(1/3)], ["rho"], ["w"])
+
+    c = lambda x: x[0]**3
+    
+    gs = GainScheduling(f, f_jac_x, f_jac_u, x_rho, w_rho, u_rho, rho, c, Q, R)
+
+    # print(gs.linear_models)
+    # print(gs.lqr_gains)
+
+    t = np.arange(0, 2.5, 0.01)
+    w = 1.3 * np.ones_like(t)
+    x = np.zeros((t.size, 2))
+    u = np.zeros_like(t)
+    for i in range(t.size-1):
+        u[i] = gs.calc_input_cmds(w[i], x[i])
+        
+        x[i+1] = x[i] + 0.01 * np.array(f(x[i], u[i])).item(0)
+
+    u[-1] = u[-2]
+    import matplotlib.pyplot as plt
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    ax1.plot(t, w, linestyle="--")
+    ax1.plot(t, x)
+    ax2.plot(t, u)
+    ax1.grid()
+    ax2.grid()
+    plt.show()
