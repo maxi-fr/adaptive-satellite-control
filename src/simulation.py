@@ -14,11 +14,13 @@ from satellite import Spacecraft, string_to_matrix
 from tqdm import tqdm
 
 from utils import Logger, PiecewiseConstant, floor_time_to_minute, floor_time_to_second, replace_orientation_matrices
+from visualization import SatelliteVisualizer
 
 
 class Simulation:
-    def __init__(self, sat: Spacecraft, initial_r_ECI: np.ndarray, initial_v_ECI: np.ndarray, initial_attitude_BO: R, initial_ang_vel_B: np.ndarray,
-                 dt: datetime.timedelta, t0: datetime.datetime, tf: datetime.datetime):
+    def __init__(self, sat: Spacecraft, initial_r_ECI: np.ndarray, initial_v_ECI: np.ndarray, 
+                 initial_attitude_BO: R, initial_ang_vel_B: np.ndarray,
+                 dt: datetime.timedelta, t0: datetime.datetime, tf: datetime.datetime, enable_viz: bool = True):
 
         self.t0 = t0
         self.dt = dt
@@ -68,9 +70,13 @@ class Simulation:
         self.atmosphere_density = PiecewiseConstant(fn=env.atmosphere_density_msis, time_bucket_fn=floor_time_to_second)
         self.magnetic_field = PiecewiseConstant(fn=env.magnetic_field_vector, time_bucket_fn=floor_time_to_second)
 
+        self.enable_viz = enable_viz
+        if self.enable_viz:
+            self.viz = SatelliteVisualizer(sat.surfaces)
+
 
     @classmethod
-    def from_json(cls, eos_file_path: str) -> "Simulation":
+    def from_json(cls, eos_file_path: str, enable_viz: bool = True) -> "Simulation":
         with open(eos_file_path, "r") as f:
             eos_file = json.load(f)
 
@@ -108,25 +114,48 @@ class Simulation:
         orbit_model = SGP4.from_tle(tle1, tle2)
         r_ECI, v_ECI = orbit_model.propagate(t0)
 
-        return cls(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, dt, t0, tf)
+        return cls(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, dt, t0, tf, enable_viz)
 
     def run(self):
         state = self.inital_state
         t = self.t0
 
-        # "u" is input applied during step[t, t+dt)
-        u = np.zeros(6)
-
         with tqdm(total=(self.tf - self.t0).total_seconds()/60, desc="Simulation time", unit="sim min") as pbar:
             while t <= self.tf:
     
-                self.world_dynamics(state, u, t, update_sensors=True) # Necessary for sensors to get current measurements.
-                
+                # TODO: find cleaner solution for updating sensors and visualization 
+                r_eci = state[0:3]
+                v_eci = state[3:6]
+                q_BI = state[6:10]
+                omega = state[10:13]
+                omega_rws = state[13:16]
+                rws_curr = state[16:19]
+                mag_curr = state[19:22]
+
+                R_BO = orc_to_sbc(q_BI, r_eci, v_eci)
+                R_OI = orc_to_eci(r_eci, v_eci).inv()
+                R_BI = eci_to_sbc(q_BI)
+
+                lat, lon, alt = eci_to_geodedic(r_eci)
+
+                rho: float = self.atmosphere_density(t, lat, lon, alt)  #type: ignore
+                B: np.ndarray = self.magnetic_field(t, lat, lon, alt)  #type: ignore
+
+                sun_pos: np.ndarray = self.sun_position(t) #type: ignore
+                in_shadow = env.is_in_shadow(r_eci, sun_pos)
+                moon_pos: np.ndarray = self.moon_position(t) #type: ignore
+
+                self.sat.sun_sensor.measure(t, sun_pos)
+                self.sat.magnetometer.measure(t, B)
+                self.sat.gps.measure(t, r_eci)
+                self.sat.gyro.measure(t, omega)
+                for i, rw in enumerate(self.sat.rw_speed_sensors):
+                    rw.measure(t, omega_rws[i])
+                    
                 # Flight software (FSW)
                 sun_mea, new_sun_mea = self.sat.sun_sensor.read(t)
                 mag_mea, new_mag_mea =self.sat.magnetometer.read(t)
                 gps_mea, new_gps_mea = self.sat.gps.read(t)
-                acc_mea, new_acc_mea = self.sat.accelerometer.read(t)
                 gyro_mea, new_gyro_mea = self.sat.gyro.read(t)
                 omega_rw_mea, new_omega_rw_mea = zip(*[rw.read(t) for rw in self.sat.rw_speed_sensors])
     
@@ -160,9 +189,13 @@ class Simulation:
 
                 t += self.dt
                 state = next_state
+
+                if self.enable_viz and int((t - self.t0).total_seconds()) % 3 == 0:
+                    self.viz.update(self.sat.surfaces, R_BO, R_OI, R_OI.apply(v_eci))
                 pbar.update(self.dt.total_seconds() / 60)
 
-    def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime, update_sensors: bool = False):
+
+    def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime):
         """
         Helper function to wrap dynamics for whole system for integration.
 
@@ -212,20 +245,21 @@ class Simulation:
         F_aero, tau_aero = dis.aerodynamic_drag(r_eci, v_eci, R_BI, self.sat.surfaces, rho)
         F_SRP, tau_SRP = dis.solar_radiation_pressure(r_eci, sun_pos, in_shadow, R_BI, self.sat.surfaces)
 
-        if self.enable_disturbance_torques is False:
+        if not self.enable_disturbance_torques:
             tau_gg = np.zeros(3)
             tau_aero = np.zeros(3)
             tau_SRP = np.zeros(3)
-        if self.enable_disturbance_forces is False:
+        
+        if not self.enable_disturbance_forces:
             F_grav = np.zeros(3)
             F_third = np.zeros(3)
             F_aero = np.zeros(3)
             F_SRP = np.zeros(3)
 
-        tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega)) for i, rw in enumerate(self.sat.rws)]) # type: ignore
-        tau_mag = sum([np.array(mag.torque(mag_curr[i], B)) for i, mag in enumerate(self.sat.mag)])
-
-        if self.enable_actuators is False:
+        if self.enable_actuators:
+            tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega)) for i, rw in enumerate(self.sat.rws)]) # type: ignore
+            tau_mag = sum([np.array(mag.torque(mag_curr[i], B)) for i, mag in enumerate(self.sat.mag)])
+        else:
             tau_rw = np.zeros(3)
             h_rw = np.zeros(3)
             tau_mag = np.zeros(3)
@@ -246,15 +280,6 @@ class Simulation:
             d_curr_mag = np.zeros(3)
 
         dx = np.concatenate((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
-
-        if update_sensors:
-            self.sat.sun_sensor.measure(t, sun_pos)
-            self.sat.magnetometer.measure(t, B)
-            self.sat.gps.measure(t, r_eci)
-            self.sat.accelerometer.measure(t, d_v, orc_to_sbc(q_BI, r_eci, v_eci))
-            self.sat.gyro.measure(t, omega)
-            for i, rw in enumerate(self.sat.rw_speed_sensors):
-                rw.measure(t, omega_rws[i])
 
         return dx
 

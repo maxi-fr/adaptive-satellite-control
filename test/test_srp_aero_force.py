@@ -1,7 +1,7 @@
 import config_imports
 from scipy.spatial.transform import Rotation as R
 from simulation import Simulation, rk4_step
-from satellite import Spacecraft, replace_orientation_matrices
+
 from kinematics import eci_to_geodedic, orc_to_eci, orc_to_sbc, quaternion_kinematics, euler_ocr_to_sbc
 import disturbances as dis
 import environment as env
@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
+
+from utils import replace_orientation_matrices
 
 
 def to_datetime(eos_data: pd.DataFrame):
@@ -56,6 +58,8 @@ vel_arr = teme_to_gcrs(time, np.array(vel))
 
 aero_force = to_datetime(pd.read_csv(os.path.join(config_imports.PROJECT_DIR, "test", "EOS Sim Data", "Sim2", "aero_force.CSV")))
 srp_force = to_datetime(pd.read_csv(os.path.join(config_imports.PROJECT_DIR, "test", "EOS Sim Data", "Sim2", "srp_force.CSV")))
+aero_torque = to_datetime(pd.read_csv(os.path.join(config_imports.PROJECT_DIR, "test", "EOS Sim Data", "Sim2", "aero_torque.CSV")))
+srp_torque = to_datetime(pd.read_csv(os.path.join(config_imports.PROJECT_DIR, "test", "EOS Sim Data", "Sim2", "srp_torque.CSV")))
 
 
 with open(os.path.join(config_imports.PROJECT_DIR, "tudsat-trace_eos.json"), "r") as f:
@@ -63,10 +67,8 @@ with open(os.path.join(config_imports.PROJECT_DIR, "tudsat-trace_eos.json"), "r"
 
 sim_init_data: dict = replace_orientation_matrices(eos_file)
 
-sim = Simulation.from_json(os.path.join(config_imports.PROJECT_DIR, "tudsat-trace_eos.json"))
+sim = Simulation.from_json(os.path.join(config_imports.PROJECT_DIR, "tudsat-trace_eos.json"), enable_viz=False)
 sat = sim.sat
-
-q_BI_true = np.empty((len(time), 4))
 
 F_grav = np.empty((len(time), 3))
 F_aero = np.empty_like(F_grav)
@@ -82,7 +84,7 @@ with tqdm(total=len(time), desc="Running") as pbar:
     for i, t in enumerate(time):
 
         q_BO_true = R.from_quat(quat_OB.iloc[i], scalar_first=False).inv()
-        q_BI_true[i] = (q_BO_true * orc_to_eci(pos_arr[i], vel_arr[i]).inv()).as_quat(scalar_first=False)
+        q_BI_true = q_BO_true * orc_to_eci(pos_arr[i], vel_arr[i]).inv()
 
         lat, lon, alt = eci_to_geodedic(pos_arr[i])
 
@@ -90,8 +92,8 @@ with tqdm(total=len(time), desc="Running") as pbar:
         sun_pos[i] = env.sun_position(t)
         in_shadow[i] = env.is_in_shadow(pos_arr[i], sun_pos[i])
 
-        F_aero[i], tau_aero[i] = dis.aerodynamic_drag(pos_arr[i], vel_arr[i], q_BI_true[i], sat.surfaces, rho[i])
-        F_SRP[i], tau_SRP[i] = dis.solar_radiation_pressure(pos_arr[i], sun_pos[i], in_shadow[i], q_BI_true[i], sat.surfaces)
+        F_aero[i], tau_aero[i] = dis.aerodynamic_drag(pos_arr[i], vel_arr[i], q_BI_true, sat.surfaces, rho[i])
+        F_SRP[i], tau_SRP[i] = dis.solar_radiation_pressure(pos_arr[i], sun_pos[i], in_shadow[i], q_BI_true, sat.surfaces)
 
         pbar.update()
 
@@ -119,5 +121,31 @@ for i in range(3):
 fig.supxlabel("Time in hours")
 fig.supylabel("Solar radiation pressure in N")
 fig.tight_layout()
+
+fig, ax = plt.subplots(1, 3)
+dir = ["X Direction", "Y Direction", "Z Direction"]
+for i in range(3):
+    ax[i].set_title(dir[i])
+    ax[i].plot(time_passed_hours[1:], tau_SRP[1:, i])
+    ax[i].plot(time_passed_hours[1:], srp_torque.iloc[:, i], color="tab:orange")
+    ax[i].grid()
+
+fig.supxlabel("Time in hours")
+fig.supylabel("Solar radiation pressure torque in Nm")
+fig.tight_layout()
+
+
+fig, ax = plt.subplots(1, 3)
+dir = ["X Direction", "Y Direction", "Z Direction"]
+for i in range(3):
+    ax[i].set_title(dir[i])
+    ax[i].plot(time_passed_hours[1:], tau_aero[1:, i])
+    ax[i].plot(time_passed_hours[1:], aero_torque.iloc[:, i], color="tab:orange")
+    ax[i].grid()
+
+fig.supxlabel("Time in hours")
+fig.supylabel("Aerodynamic torque in Nm")
+fig.tight_layout()
+
 plt.show(block=True)
 

@@ -160,7 +160,7 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, R_BI: R, surfaces: Li
 
     v_atm_I = np.cross(OMEGA_E, r_eci)  # = np.array([OMEGA_E[2] * r_eci[1], OMEGA_E[2] * r_eci[0], 0])
 
-    v_rel_B = R_BI.apply(v_atm_I + v_eci)
+    v_rel_B = R_BI.apply(v_eci - v_atm_I)
 
     v_rel_B_norm = np.linalg.norm(v_rel_B)
     v_rel_B_unit = v_rel_B / v_rel_B_norm
@@ -174,9 +174,11 @@ def aerodynamic_drag(r_eci: np.ndarray, v_eci: np.ndarray, R_BI: R, surfaces: Li
         if cos_theta_i < 0:
             continue
 
-        F -= rho * v_rel_B_norm**2 * s.area * cos_theta_i * (s.sigma_t * v_rel_B_unit +
+        F_i = -rho * v_rel_B_norm**2 * s.area * cos_theta_i * (s.sigma_t * v_rel_B_unit +
                                                             (s.sigma_n * s.S + (2 - s.sigma_n - s.sigma_t) * cos_theta_i) * s.normal)
-        tau += np.cross(s.center, F)
+        tau += np.cross(s.center, F_i)
+        F += F_i
+
 
     return F, tau
 
@@ -220,8 +222,9 @@ def solar_radiation_pressure(r_eci: np.ndarray, sun_pos_eci: np.ndarray, in_shad
         if cos_theta_i < 0:
             continue
 
-        F -= P * s.area * cos_theta_i * ((1 - s.rho_s - s.rho_t) * sun_dir + (2 * s.rho_s * cos_theta_i + 2/3 * s.rho_d) * s.normal)
+        F_i = -P * s.area * cos_theta_i * ((1 - s.rho_s - s.rho_t) * sun_dir + (2 * s.rho_s * cos_theta_i + 2/3 * s.rho_d) * s.normal)
         
-        tau += np.cross(s.center, F)
+        tau += np.cross(s.center, F_i)
+        F += F_i
 
     return F, tau

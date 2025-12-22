@@ -135,7 +135,6 @@ class Surface:
         R_BS = np.asarray(
             dict["Orientation"]).T  # EOS often gives the orientation as rows; we want a matrix with axes in columns
 
-        # sanity check: needs to be a rotation matrix
         if not np.allclose(R_BS.T @ R_BS, np.eye(3), atol=1e-6):
             raise ValueError("Surface.from_eos_panel: Orientation matrix is not orthonormal after transpose.")
         if np.linalg.det(R_BS) < 0.0:
@@ -204,6 +203,16 @@ class Surface:
             length=normal_scale,
             color="red"
         )
+
+    def corners(self) -> np.ndarray:
+        p = self.pos
+        return np.array([
+            p,
+            p + self.x_axis,
+            p + self.x_axis + self.y_axis,
+            p + self.y_axis
+        ])
+
 
     def self_occlusion(self, direction: np.ndarray, surfaces: List["Surface"]) -> bool:
         """
