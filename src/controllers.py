@@ -1,352 +1,204 @@
+from abc import ABC, abstractmethod
 import casadi as ca
 import numpy as np
-from typing import Callable, List
+from typing import Callable, List, Tuple, Optional, Union, Any
 import control as ct
 
-def integrator(f: ca.Function, x: ca.SX, u: ca.SX, dt: ca.SX) -> ca.SX:
+
+class Controller(ABC):
     """
-    Performs a single RK4 integration step for a system without parameters.
-
-    Parameters
-    ----------
-    f : ca.Function
-        The system dynamics function with the signature f(x, u).
-    x : ca.SX
-        The current state vector.
-    u : ca.SX
-        The current control input vector.
-    dt : ca.SX
-        The integration time step.
-
-    Returns
-    -------
-    ca.SX
-        The state vector at the next time step.
+    Abstract base class for controllers.
     """
-    k1 = f(x, u)
-    k2 = f(x + 0.5 * dt * k1, u)
-    k3 = f(x + 0.5 * dt * k2, u)
-    k4 = f(x + dt * k3, u)
-    return x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4) #type: ignore
-
-def quaternion_product() -> ca.Function:
-    """
-    Builds a CasADi function for quaternion multiplication.
-
-    The function implements the product of two quaternions, qa and qb,
-    assuming scalar-last format [qx, qy, qz, qw].
-
-    Returns
-    -------
-    ca.Function
-        A CasADi function with signature `f(qa, qb) -> q_ret`.
-    """
-    qa = ca.SX.sym('qa', 4) #type: ignore
-    qb = ca.SX.sym('qb', 4) #type: ignore
-    q_ret = ca.SX.sym('q_ret', 4) #type: ignore
-
-    q_ret[:3] = qb[3]*qa[:3] + qa[3]*qb[:3] + ca.cross(qa[:3], qb[:3])
-    q_ret[3] = qa[3]*qb[3] - ca.dot(qa[:3], qb[:3])
-
-    return ca.Function("quaternion_product", [qa, qb], [q_ret])
-quat_prod: ca.Function = quaternion_product()
-
-def quaternion_rotation() -> ca.Function:
-    """
-    Builds a CasADi function for rotating a 3D vector by a quaternion.
-
-    Returns
-    -------
-    ca.Function
-        A CasADi function with signature `f(q, x) -> x_ret`.
-    """
-    q = ca.SX.sym('q', 4) #type: ignore
-    q_conj = ca.SX.sym('q_conj', 4) #type: ignore
-    x_vec_4 = ca.SX.sym('vec', 4) #type: ignore
-    x = x_vec_4[:3]
-    x_vec_4[3] = 0
-
-    q_conj[:3] = q[:3]
-    q_conj[3] = -q[3]
-
-    x_ret = quat_prod(quat_prod(q, x_vec_4), q_conj)[:3] #type: ignore
-
-    return ca.Function("quaternion_rotation", [q, x], [x_ret])
-quat_rot: ca.Function = quaternion_rotation()
-
-def _attitude_error_vec(q_ref: np.ndarray, q_est: np.ndarray) -> np.ndarray:
-    q_ref = np.asarray(q_ref, dtype=float).reshape(4)
-    q_est = np.asarray(q_est, dtype=float).reshape(4)
-
-    q_est_conj = q_est.copy()
-    q_est_conj[:3] *= -1.0
-
-    q_err = quat_prod_np(q_ref, q_est_conj) 
-    if q_err[3] < 0:
-        q_err = -q_err
-    e_q = 2.0 * q_err[:3]
-
-    return e_q
-
-
-def build_kinematics() -> ca.Function:
-    """
-    Builds the symbolic quaternion kinematics function.
-
-    The function describes the time derivative of a quaternion based on angular velocity.
-    q_dot = 0.5 * w (x) q
-
-    Returns
-    -------
-    ca.Function
-        A CasADi function `f(q, w) -> q_dot`.
-    """
-    q = ca.SX.sym('q', 4) #type: ignore
-    w = ca.SX.sym(r'\omega', 3) #type: ignore
-
-    qv = q[:3]
-    qw = q[3]
-
-    qv_dot = 0.5 * (qw * w + ca.cross(w, qv))
-    qw_dot = -0.5 * ca.dot(w, qv)
-
-    q_dot = ca.vertcat(qv_dot, qw_dot)
-
-    return ca.Function("f_kin", [q, w], [q_dot], ["q", "w"], ["q_dot"])
-
-
-def build_rotational_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np.ndarray, K_mag: np.ndarray) -> ca.Function:
-    """
-    Builds the symbolic rotational dynamics function (Euler's equation).
-
-    Parameters
-    ----------
-    J_hat : np.ndarray
-        Estimated inertia tensor of the satellite.
-    A_hat : np.ndarray
-        Reaction wheel alignment matrix.
-    K_t_dash : np.ndarray
-        Reaction wheel torque constant.
-    K_mag : np.ndarray
-        Magnetorquer dipole moment constant.
-
-    Returns
-    -------
-    ca.Function
-        A CasADi function `f(q_BI, omega, u_rw, u_mag, omega_w, B_B) -> omega_dot`.
-    """
-    omega = ca.SX.sym('omega', 3) #type: ignore
-    h_w = ca.SX.sym("h_w", 3) #type: ignore
-
-    u_rw = ca.SX.sym('u_rw', 3) #type: ignore
-    u_mag = ca.SX.sym('u_mag', 3) #type: ignore
+    def __init__(self) -> None:
+        pass
     
-    B_B = ca.SX.sym('B_B', 3) #type: ignore
+    @abstractmethod
+    def calc_input_cmds(self, w: np.ndarray, x: np.ndarray, dt: Optional[float] = None, *args: Any) -> np.ndarray:
+        """
+        Calculates the control input commands.
+
+        Parameters
+        ----------
+        w : np.ndarray
+            Reference vector.
+        x : np.ndarray
+            State vector.
+        dt : float, optional
+            Time step, by default None.
+
+        Returns
+        -------
+        np.ndarray
+            Control input vector.
+        """
+        pass
 
 
-    # TODO: maybe implement build_rw and build_mag functions to deal with saturation and so on
-    tau_rw = A_hat @ (K_t_dash * u_rw) 
-    tau_mag = ca.cross(K_mag * u_mag, B_B) 
-
-    cross_term = ca.cross(omega, J_hat @ omega + h_w)
-    total_torque = tau_mag - tau_rw - cross_term
-    omega_dot = ca.solve(J_hat, total_torque)
-
-    return ca.Function(
-        "f_rot",
-        [omega, u_rw, u_mag, h_w, B_B],
-        [omega_dot],
-        ["q_BI", "omega", "u_rw", "u_mag", "h_w", "B_B"],
-        ["omega_dot"]
-    )
-
-
-def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np.ndarray, K_mag: np.ndarray) -> ca.Function:
+class PI(Controller):
     """
-    Builds the complete symbolic dynamics model for the satellite attitude.
-
-    This combines kinematics, rotational dynamics, and wheel dynamics into a single
-    state-space function dx/dt = f(x, u, p).
-
-    Parameters
-    ----------
-    J_hat, A_hat, K_e_rw, K_t_dash, K_mag : np.ndarray
-        Physical parameters of the satellite and actuators.
-
-    Returns
-    -------
-    ca.Function
-        A CasADi function `f(x, u, B_B) -> dx`.
+    Proportional-Integral controller with anti-windup.
     """
-    f_kin: ca.Function = build_kinematics()
-    f_rot: ca.Function = build_rotational_dynamics(J_hat, A_hat, K_t_dash, K_mag)
-
-    q_BI = ca.SX.sym('q_BI', 4) #type: ignore 
-    omega = ca.SX.sym('omega', 3) #type: ignore
-    h_w = ca.SX.sym("h_w", 3) #type: ignore
-    x = ca.vertcat(q_BI, omega, h_w)
-
-    u_rw = ca.SX.sym('u_rw', 3) #type: ignore
-    u_mag = ca.SX.sym('u_mag', 3) #type: ignore
-    u = ca.vertcat(u_rw, u_mag)
-
-    B_B = ca.SX.sym('B_B', 3) #type: ignore
-
-    d_q_BI = f_kin(q_BI, omega)
-    d_omega = f_rot(omega, u_rw, u_mag, h_w, B_B)
-    d_h_w = A_hat @ (K_t_dash * u_rw)
-
-    dx = ca.vertcat(d_q_BI, d_omega, d_h_w)
-
-    return ca.Function("system_dynamics", [x, u, B_B], [dx], ["x", "u", "B_B"], ["dx"])
-
-
-def build_error_dynamics(omega_c: np.ndarray, J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np.ndarray, K_mag: np.ndarray) -> tuple[ca.Function, ca.Function, ca.Function]:
-    """
-    Builds the complete symbolic dynamics model for the attitude error.
-
-    This combines kinematics, rotational dynamics, and wheel dynamics into a single
-    state-space function dx/dt = f(x, u, *params).
-
-    Parameters
-    ----------
-    J_hat, J_w, A_hat, K_e_rw, K_t_dash, K_mag : np.ndarray
-        Physical parameters of the satellite and actuators.
-
-    Returns
-    -------
-    ca.Function
-        A CasADi function `f(x, u, B_B) -> dx`.
-    """
-    f_kin: ca.Function = build_kinematics()
-    f_rot: ca.Function = build_rotational_dynamics(J_hat, A_hat, K_t_dash, K_mag)
-
-    B_B = ca.SX.sym('B_B', 3) #type: ignore
-
-    q_err = ca.SX.sym("q_err", 3) #type: ignore
-    omega_err = ca.SX.sym("omega_err", 3) #type: ignore
-    h_w = ca.SX.sym("h_w", 3) #type: ignore
-    x = ca.vertcat(q_err, omega_err, h_w)
-
-    u_rw = ca.SX.sym('u_rw', 3) #type: ignore
-    u_mag = ca.SX.sym('u_mag', 3) #type: ignore
-    u = ca.vertcat(u_rw, u_mag)
     
-    omega = omega_err + quat_rot(q_err) @ omega_c
+    def __init__(self, K_q: np.ndarray, K_omega: np.ndarray, K_w: np.ndarray, K_q_int: np.ndarray, 
+                 operating_point: Tuple[np.ndarray, np.ndarray], m: float, u_min: float, u_max: float) -> None:
+        """
+        Initializes the PI controller.
+
+        Parameters
+        ----------
+        K_q : np.ndarray
+            Proportional gain matrix for attitude error.
+        K_omega : np.ndarray
+            Derivative gain matrix for angular velocity error.
+        K_w : np.ndarray
+            Gain matrix for wheel momentum error.
+        K_q_int : np.ndarray
+            Integral gain matrix for attitude error.
+        operating_point : Tuple[np.ndarray, np.ndarray]
+            The operating point (x_star, u_star).
+        m : float
+            Anti-windup gain.
+        u_min : float
+            Minimum control input value (saturation).
+        u_max : float
+            Maximum control input value (saturation).
+        """
+
+
+        super().__init__()
+        self.x_star, self.u_star = *operating_point
+        self.q_err_int = np.zeros(3)
+
+        self.K_q = K_q
+        self.K_omega = K_omega
+        self.K_wheel = K_w
+        self.K_q_int = K_q_int
+        self.u_min = u_min
+        self.u_max = u_max
+        self.m = m
+
+    @classmethod
+    def from_lqr(cls, f_x: Callable[[np.ndarray, np.ndarray], np.ndarray], f_u: Callable[[np.ndarray, np.ndarray], np.ndarray], 
+                 operating_point: Tuple[np.ndarray, np.ndarray], Q: np.ndarray, R: np.ndarray, 
+                 m: float, u_min: float, u_max: float, K_q_int: np.ndarray|None = None) -> "PI":
+        """
+        Creates a PI controller using LQR gains.
+
+        Parameters
+        ----------
+        f_x : Callable[[np.ndarray, np.ndarray], np.ndarray]
+            Function returning the Jacobian of dynamics w.r.t state (A matrix).
+        f_u : Callable[[np.ndarray, np.ndarray], np.ndarray]
+            Function returning the Jacobian of dynamics w.r.t input (B matrix).
+        operating_point : Tuple[np.ndarray, np.ndarray]
+            The operating point (x_star, u_star).
+        Q : np.ndarray
+            State cost matrix.
+        R : np.ndarray
+            Input cost matrix.
+        m : float
+            Anti-windup gain.
+        u_min : float
+            Minimum control input.
+        u_max : float
+            Maximum control input.
+        K_q_int : np.ndarray, optional
+            Integral gain matrix for attitude error, by default None.
+
+        Returns
+        -------
+        PI
+            Initialized PI controller instance.
+        """
+        A = f_x(*operating_point)
+        B = f_u(*operating_point)
+        
+        K, S, E = ct.lqr(A, B, Q, R)
+
+        if K_q_int is None:
+            K_q_int = np.zeros((K.shape[0], 3))
+
+        return cls(K[:, :3], K[:, 3:6], K[:, 6:9], K_q_int, operating_point, m, u_min, u_max)
     
-    q_err[3] = 1 - ca.dot(q_err[:3], q_err[:3])
 
-    d_omega = f_rot(omega, u_rw, u_mag, h_w, B_B)
+    def calc_input_cmds(self, w: np.ndarray, x: np.ndarray, dt: Optional[float] = None, *args: Any) -> np.ndarray:
+        """
+        Calculates the control input.
 
-    d_q_err = f_kin(q_err, omega_err)
-    d_omega_err = d_omega + ca.cross(omega_err, quat_rot(q_err) @ omega_c)
+        Parameters
+        ----------
+        w : np.ndarray
+            Reference vector (unused in this implementation as x_star is fixed).
+        x : np.ndarray
+            Current state vector.
+        dt : float, optional
+            Time step, required for integral term.
 
-    # TODO: maybe implement build_rw and build_mag functions to deal with saturation and so on
-    d_h_w = A_hat @ (K_t_dash * u_rw)
+        Returns
+        -------
+        np.ndarray
+            Control input vector.
 
-    dx  = ca.vertcat(d_q_err, d_omega_err, d_h_w)
+        Raises
+        ------
+        ValueError
+            If dt is not provided.
+        """
 
-    f_tot = ca.Function("error_dynamics", [x, u, B_B], [dx], ["x", "u", "B_B"], ["dx"])
-    f_jac_x = ca.Function("f_jac_x", [x, u, B_B], [ca.jacobian(dx, x)], ["x", "u", "B_B"], ["jac_x"])
-    f_jac_u = ca.Function("f_jac_u", [x, u, B_B], [ca.jacobian(dx, u)], ["x", "u", "B_B"], ["jac_u"])
-
-    return f_tot, f_jac_x, f_jac_u
-
-
-def simple_rw_mag_controller(
-    q_est: np.ndarray,
-    omega_est: np.ndarray,
-    q_ref: np.ndarray,
-    omega_ref: np.ndarray,
-    Kp_q: float,
-    Kd_w: float,
-    K_t_rw: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    q_est = np.asarray(q_est, dtype=float).reshape(4)
-    q_ref = np.asarray(q_ref, dtype=float).reshape(4)
-    omega_est = np.asarray(omega_est, dtype=float).reshape(3)
-    omega_ref = np.asarray(omega_ref, dtype=float).reshape(3)
-
-    # error of attitude and angular velocity
-    e_q = _attitude_error_vec(q_ref, q_est)
-    e_w = omega_est - omega_ref
-    # body moment that we want
-    tau_cmd = -Kp_q * e_q - Kd_w * e_w
-    # map
-    K_t_rw = float(K_t_rw)
-    u_rw = tau_cmd / K_t_rw   # current to 3 wheels
-    # magnetorquers turned off for now
-    u_mag = np.zeros(3)
-
-    return u_rw, u_mag
+        if dt is None:
+            raise ValueError("dt must be provided")
+        D_x = x - self.x_star
+        q_err = D_x[:3]
+        omega_err = D_x[3:]
+        h_w = D_x[6:]
 
 
-def jacobian_no_seeds(f):
-    """
-    Wrap CasADi's Jacobian function so that seed inputs are hidden.
-    Returns a callable that only requires the original inputs.
-    """
-    jac_f = f.jacobian()
+        self.q_err_int += q_err * dt
 
-    n_in = f.n_in()
-    n_out = f.n_out()
+        u_R = - (self.K_q @ q_err + self.K_omega @ omega_err + self.K_wheel @ h_w + self.K_q_int @ self.q_err_int)
 
-    def wrapped(*args):
-        assert len(args) == n_in
+        u = np.clip(u_R, self.u_min, self.u_max)
 
-        # Evaluate outputs to infer correct seed shapes
-        outs = f(*args)
+        self.q_err_int -= self.m * (u_R - u) # anti wind up
 
-        # Ensure tuple output
-        if n_out == 1:
-            outs = (outs,)
+        return u + self.u_star
+    
 
-        # Zero seeds for each output
-        seeds = [ca.DM.zeros(o.size()) for o in outs]
-
-        return jac_f(*args, *seeds)
-
-    return wrapped
-
-def split_jacobian_x_u(f):
-    """
-    Given f(x, u), return two functions:
-      - f_jac_x(x, u): Jacobian wrt x
-      - f_jac_u(x, u): Jacobian wrt u
-    """
-    assert f.n_in() == 2, "f must have exactly two inputs (x, u)"
-
-    jac_f = f.jacobian()
-
-    def _zero_seeds(x_val, u_val):
-        outs = f(x_val, u_val)
-        if f.n_out() == 1:
-            outs = (outs,)
-        return [ca.DM.zeros(o.size()) for o in outs]
-
-    def f_jac_x(x_val, u_val):
-        seeds = _zero_seeds(x_val, u_val)
-        jac_blocks = jac_f(x_val, u_val, *seeds)
-
-        # Blocks are ordered: (out1_x, out1_u, out2_x, out2_u, ...)
-        return tuple(jac_blocks[::2])
-
-    def f_jac_u(x_val, u_val):
-        seeds = _zero_seeds(x_val, u_val)
-        jac_blocks = jac_f(x_val, u_val, *seeds)
-
-        return tuple(jac_blocks[1::2])
-
-    return f_jac_x, f_jac_u
-
-class GainScheduling:
+class GainScheduling(Controller):
 
     def __init__(self, f: ca.Function, f_jac_x: ca.Function, f_jac_u: ca.Function, 
                  x_rho: Callable[[np.ndarray], np.ndarray], w_rho: Callable[[np.ndarray], np.ndarray], 
                  u_rho: Callable[[np.ndarray], np.ndarray], 
                  rho: List[np.ndarray], calc_scheduling_param: Callable[[np.ndarray], np.ndarray],
                  Q: List[np.ndarray]|np.ndarray, R: List[np.ndarray]|np.ndarray):
-        
+        """
+        Initializes the Gain Scheduling controller.
+
+        Parameters
+        ----------
+        f : ca.Function
+            System dynamics function.
+        f_jac_x : ca.Function
+            Jacobian of dynamics w.r.t state.
+        f_jac_u : ca.Function
+            Jacobian of dynamics w.r.t input.
+        x_rho : Callable[[np.ndarray], np.ndarray]
+            Function mapping scheduling parameter to state operating point.
+        w_rho : Callable[[np.ndarray], np.ndarray]
+            Function mapping scheduling parameter to reference operating point.
+        u_rho : Callable[[np.ndarray], np.ndarray]
+            Function mapping scheduling parameter to input operating point.
+        rho : List[np.ndarray]
+            List of scheduling parameter values defining the operating points.
+        calc_scheduling_param : Callable[[np.ndarray, *args], np.ndarray]
+            Function to calculate the current scheduling parameter from state.
+        Q : Union[List[np.ndarray], np.ndarray]
+            State cost matrix or list of matrices for each operating point used in LQR.
+        R : Union[List[np.ndarray], np.ndarray]
+            Input cost matrix or list of matrices for each operating point used in LQR.
+        """
+
+        super().__init__()
         self.operating_points = [(x_rho(p), u_rho(p), w_rho(p)) for p in rho]
         self.rho = np.stack([np.atleast_1d(p) for p in rho], axis=0)
         self.calc_scheduling_param = calc_scheduling_param
@@ -364,13 +216,43 @@ class GainScheduling:
         #self.place_gains = [ct.place(np.array(A).squeeze(), np.array(B).squeeze(), P[i]) for i, (A, B) in enumerate(self.linear_models)]
         self.lqr_gains = [ct.lqr(np.squeeze(A), np.squeeze(B), self.Q[i], self.R[i])[0] for i, (A, B) in enumerate(self.linear_models)] # type: ignore
 
-    def closest_operating_points(self, beta):
+    def closest_operating_points(self, beta: np.ndarray) -> Tuple[int, int]:
+        """
+        Finds the indices of the two closest operating points.
+
+        Parameters
+        ----------
+        beta : np.ndarray
+            Current scheduling parameter.
+
+        Returns
+        -------
+        Tuple[int, int]
+            Indices of the two closest operating points.
+        """
         i, j = np.argsort(np.linalg.norm(self.rho - beta, axis=1))[:2]
 
         return i, j
 
 
-    def calc_input_cmds(self, w, x, *args):
+    def calc_input_cmds(self, w: np.ndarray, x: np.ndarray, dt: Optional[float] = None, *args: Any) -> np.ndarray:
+        """
+        Calculates the control input using gain scheduling.
+
+        Parameters
+        ----------
+        w : np.ndarray
+            Reference vector.
+        x : np.ndarray
+            Current state vector.
+        dt : float, optional
+            Time step (unused).
+
+        Returns
+        -------
+        np.ndarray
+            Control input vector.
+        """
         beta = self.calc_scheduling_param(x, *args)
 
         i, j = self.closest_operating_points(beta)
