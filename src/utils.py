@@ -87,7 +87,7 @@ class Surface:
 
     def __init__(self, position: np.ndarray, x_len: float, y_len: float, R_BS: np.ndarray,
                  sigma_t: float = 0.8, sigma_n: float = 0.8, S: float = 0.05,
-                 rho_s: float = 0.83, rho_d: float = 0.0, rho_t: float = 0.0, rho_a: float = 0.17):
+                 rho_s: float = 0.83, rho_d: float = 0.0, rho_t: float = 0.0, rho_a: float = 0.17, name: str = "-"):
         
         self.pos = position
         self.x_len = x_len
@@ -112,6 +112,8 @@ class Surface:
         self.rho_d = rho_d
         self.rho_t = rho_t
         self.rho_a = rho_a
+        self.name = name
+
 
     @classmethod
     def from_eos_panel(cls, dict: dict):
@@ -142,6 +144,34 @@ class Surface:
                 "Surface.from_eos_panel: Orientation matrix has det < 0 (reflection), expected proper rotation.")
 
         return cls(dict["Position"], dict.get("DimX", 0.1), dict.get("DimY", 0.1), R_BS)
+    
+    @classmethod
+    def from_dict(cls, name, dict: dict):
+        R_BS = np.array(dict["Rotation (Surface frame to Body)"])
+
+        if not np.allclose(R_BS.T @ R_BS, np.eye(3), atol=1e-6):
+            raise ValueError("Surface.from_eos_panel: Orientation matrix is not orthonormal after transpose.")
+        if np.linalg.det(R_BS) < 0.0:
+            raise ValueError(
+                "Surface.from_eos_panel: Orientation matrix has det < 0 (reflection), expected proper rotation.")
+
+        return cls(np.array(dict["Origin"]), dict.get("DimX", 0.1), dict.get("DimY", 0.1), R_BS, name=name)
+    
+    def to_dict(self):
+        return {
+            "Origin": self.pos.tolist(),
+            "DimX": self.x_len,
+            "DimY": self.y_len,
+            "Rotation (Surface frame to Body)": self.R_BS.tolist(),
+            "sigma_t": self.sigma_t,
+            "sigma_n": self.sigma_n,
+            "S": self.S,
+            "rho_s": self.rho_s,
+            "rho_d": self.rho_d,
+            "rho_t": self.rho_t,
+            "rho_a": self.rho_a,
+        }
+        
 
     def plot(self, ax, R_FB: R|None=None, color="cyan", alpha=0.4, normal_scale=0.05):
         """
@@ -303,6 +333,16 @@ def replace_orientation_matrices(data_structure):
             replace_orientation_matrices(item)
             
     return data_structure
+
+def string_to_timedelta(total_time: str) -> datetime.timedelta:
+    match tuple(map(float, total_time.split(':'))):
+        case (hours, minutes, seconds):
+            return datetime.timedelta(hours=hours, minutes=minutes, seconds=seconds)
+        case (minutes, seconds):
+            return datetime.timedelta(minutes=minutes, seconds=seconds)
+        case (seconds,):
+            return datetime.timedelta(seconds=seconds)
+    raise ValueError(f"String '{total_time}' not in format h:m:s")
 
 
 class PiecewiseConstant:

@@ -22,6 +22,10 @@ class Sensor(ABC):
     def read(self, t: datetime.datetime):
         pass
 
+    def to_dict(self):
+        return {"frequency": 1.0 / self.period.total_seconds()}
+
+
 class Accelerometer(Sensor):
     def __init__(self, frequency: float, sigma_sq: float, bias_sigma_sq: float):
         super().__init__(frequency)
@@ -75,6 +79,12 @@ class Gyroscope(Sensor):
         self.bias_sigma_sq = bias_sigma_sq
         self.sigma_sq = sigma_sq
 
+    def to_dict(self):
+        data = super().to_dict()
+        data["sigma_sq"] = self.sigma_sq
+        data["bias_sigma_sq"] = self.bias_sigma_sq
+        return data
+
     def measure(self, t: datetime.datetime, omega: np.ndarray): # type: ignore
         if t.tzinfo is None:
             t = t.replace(tzinfo=datetime.timezone.utc)
@@ -117,6 +127,12 @@ class Magnetometer(Sensor):
         self.sigma_sq = sigma_sq
         self.const_bias = const_bias
         self.B = np.zeros(3)
+    
+    def to_dict(self):
+        data = super().to_dict()
+        data["sigma_sq"] = self.sigma_sq
+        data["const_bias"] = self.const_bias.tolist()
+        return data
 
     def measure(self, t: datetime.datetime, B_body: np.ndarray): # type: ignore
         dt = (t - self.last_measurement)
@@ -149,6 +165,12 @@ class SunSensor(Sensor):
         self.sigma_sq = sigma_sq
         self.sun_pos = np.zeros(3)
 
+    def to_dict(self):
+        data = super().to_dict()
+        data["sigma_sq"] = self.sigma_sq
+        return data
+
+
     def measure(self, t: datetime.datetime, sun_pos: np.ndarray):
         dt = (t - self.last_measurement)
 
@@ -167,6 +189,11 @@ class GPS(Sensor):
 
         self.sigma_sq = sigma_sq
         self.sat_pos = np.zeros(3)
+
+    def to_dict(self):
+        data = super().to_dict()
+        data["sigma_sq"] = self.sigma_sq
+        return data
 
 
     def measure(self, t: datetime.datetime, sat_pos: np.ndarray): # type: ignore
@@ -187,6 +214,11 @@ class RW_tachometer(Sensor):
 
         self.sigma_sq = sigma_sq
         self.omega = 0
+
+    def to_dict(self):
+        data = super().to_dict()
+        data["sigma_sq"] = self.sigma_sq
+        return data
 
     def measure(self, t: datetime.datetime, omega: np.ndarray): # type: ignore
         if t.tzinfo is None:

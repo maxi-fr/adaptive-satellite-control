@@ -38,7 +38,7 @@ eos_data.columns
 quat_OB = eos_data[['Q1', 'Q2', 'Q3', 'Q4']]
 quat_OB /= np.linalg.norm(quat_OB, axis=1, keepdims=True)
 
-omega_BO_deg = eos_data[['X (deg/s)', 'Y (deg/s)', 'Z (deg/s)']]
+omega_B_BI_deg = eos_data[['X (deg/s)', 'Y (deg/s)', 'Z (deg/s)']]
 
 euler_OB = eos_data[['Roll (deg)', 'Pitch (deg)', 'Yaw (deg)']]
 

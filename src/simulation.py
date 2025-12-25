@@ -13,14 +13,15 @@ from kinematics import eci_to_sbc, euler_ocr_to_sbc, orc_to_eci, orc_to_sbc, qua
 from satellite import Spacecraft, string_to_matrix
 from tqdm import tqdm
 
-from utils import Logger, PiecewiseConstant, floor_time_to_minute, floor_time_to_second, replace_orientation_matrices
+from utils import Logger, PiecewiseConstant, floor_time_to_minute, floor_time_to_second, replace_orientation_matrices, string_to_timedelta
 from visualization import SatelliteVisualizer
 
 
 class Simulation:
-    def __init__(self, sat: Spacecraft, initial_r_ECI: np.ndarray, initial_v_ECI: np.ndarray, 
-                 initial_attitude_BO: R, initial_ang_vel_B: np.ndarray,
-                 dt: datetime.timedelta, t0: datetime.datetime, tf: datetime.datetime, enable_viz: bool = True):
+    def __init__(self, sat: Spacecraft, tle: tuple[str, str], initial_attitude_BO: R, initial_ang_vel_B: np.ndarray,
+                 dt: datetime.timedelta, t0: datetime.datetime, tf: datetime.datetime,
+                 enable_viz: bool = True, enable_log: bool = True, enable_disturbance_torques: bool = True,
+                 enable_disturbance_forces: bool = True):
 
         self.t0 = t0
         self.dt = dt
@@ -28,37 +29,48 @@ class Simulation:
 
         self.sat = sat
         self.inital_state = np.zeros(22)
+
+        orbit_model = SGP4.from_tle(*tle)
+        self.initial_tle = tle
+        initial_r_ECI, initial_v_ECI = orbit_model.propagate(t0)
         self.inital_state[:3] = initial_r_ECI
         self.inital_state[3:6] = initial_v_ECI
 
         # R_BI = R_BO * (R_IO)^-1
         self.inital_state[6:10] = (initial_attitude_BO * orc_to_eci(self.inital_state[0:3],
                                                                     self.inital_state[3:6]).inv()
-                                  ).as_quat(scalar_first=False)
-                                   # quaternion representing rotation from ECI to Body Frame
+                                   ).as_quat(scalar_first=False)
+        # quaternion representing rotation from ECI to Body Frame
 
-        self.enable_disturbance_torques = True
-        self.enable_disturbance_forces = True
+        self.enable_disturbance_torques = enable_disturbance_torques
+        self.enable_disturbance_forces = enable_disturbance_forces
         # use these two together enable actuators and freeze actuator states
-        self.enable_actuators = True
-        self.freeze_actuator_states = False
+        self.enable_actuators = False
+        self.freeze_actuator_states = True
         self.freeze_body_rates = False
 
         if initial_ang_vel_B is not None:
             self.inital_state[10:13] = initial_ang_vel_B
 
-        # ===== info log =====
-        self.log_folder = "Simulation_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        if not os.path.exists(self.log_folder):
-            os.makedirs(self.log_folder)
-        self.state_logger = Logger(os.path.join(self.log_folder, "state.csv"), 
-                        ['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
-                            'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
-                             'omega_rw_1', 'omega_rw_2', 'omega_rw_3',
-                             'i_rw_1', 'i_rw_2', 'i_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3'])
-        self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"), 
-                    ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3'])
-        
+        self.enable_log = enable_log
+        if self.enable_log:
+            self.log_folder = "Simulation_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            if not os.path.exists(self.log_folder):
+                os.makedirs(self.log_folder)
+                
+            with open(os.path.join(self.log_folder, ".gitignore"), "w") as f:
+                f.write("*")
+                
+            self.to_json(os.path.join(self.log_folder, "config.json"))
+
+            self.state_logger = Logger(os.path.join(self.log_folder, "state.csv"),
+                                       ['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
+                                        'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
+                                        'omega_rw_1', 'omega_rw_2', 'omega_rw_3',
+                                        'i_rw_1', 'i_rw_2', 'i_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3'])
+            self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"),
+                                       ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3'])
+
         self.att_ekf = AttitudeEKF(q0=self.inital_state[6:10], b0=self.inital_state[10:13], P0=np.eye(6), Qc=np.eye(6),
                                    R_sun=np.eye(3), R_mag=np.eye(3))
 
@@ -74,47 +86,87 @@ class Simulation:
         if self.enable_viz:
             self.viz = SatelliteVisualizer(sat.surfaces)
 
-
     @classmethod
-    def from_json(cls, eos_file_path: str, enable_viz: bool = True) -> "Simulation":
-        with open(eos_file_path, "r") as f:
-            eos_file = json.load(f)
+    def from_json(cls, file_path: str, enable_viz: bool = True, enable_log: bool = True):
+        with open(file_path, "r") as f:
+            data = json.load(f)
 
-        data: dict = replace_orientation_matrices(eos_file)  # type: ignore
-
-        settings = data["Settings"] # type: ignore
-        start = settings["SimulationStart"]
-
-        # If there's a "Z", change to +00:00, so the fromisoformat can always handle it
-        if isinstance(start, str) and start.endswith("Z"):
-            start = start[:-1] + "+00:00"
-
-        t0 = datetime.datetime.fromisoformat(start)
-
-        # If there's going to be a time without timezone, forcefully take it as UTC
+        data_sim = data["Simulation"]
+        t0 = datetime.datetime.fromisoformat(data_sim["Start"])
         if t0.tzinfo is None:
             t0 = t0.replace(tzinfo=datetime.timezone.utc)
 
-        dt_ = tuple(map(float, settings["SimulationPeriod"].split(":")))
-        dt = datetime.timedelta(hours=dt_[0], minutes=dt_[1], seconds=dt_[2])
+        dt = string_to_timedelta(data_sim["Stepsize"])
 
-        dur_ = tuple(map(int, settings["SimulationDuration"].split(":")))
-        dur = datetime.timedelta(hours=dur_[0], minutes=dur_[1], seconds=dur_[2])
+        dur = string_to_timedelta(data_sim["Duration"])
+
         tf = t0 + dur
 
-        kin_model = data["ModelObjects"]["Kinematic Model"] # type: ignore
-        roll = kin_model["InitialRoll"] # deg
-        pitch = kin_model["InitialPitch"]
-        yaw = kin_model["InitialYaw"]
-        init_ang_vel_B_BI = string_to_matrix(kin_model["InitialRates"])
-        init_att_BO = euler_ocr_to_sbc(roll, pitch, yaw)
+        enable_disturbance_torques = data.get("DisturbanceTorques", True)
+        enable_disturbance_forces = data.get("DisturbanceForces", True)
 
-        tle1 = data["ModelObjects"]["Orbit Model"]["Tle1"] # type: ignore
-        tle2 = data["ModelObjects"]["Orbit Model"]["Tle2"] # type: ignore
+        data_init_state = data["InitialState"]
+
+        tle1 = data_init_state["TLE"]["Line 1"]
+        tle2 = data_init_state["TLE"]["Line 2"]
         orbit_model = SGP4.from_tle(tle1, tle2)
         r_ECI, v_ECI = orbit_model.propagate(t0)
 
-        return cls(Spacecraft.from_eos_file(data, dt), r_ECI, v_ECI, init_att_BO, init_ang_vel_B_BI, dt, t0, tf, enable_viz)
+        roll = data_init_state["Attitude"]["Roll (deg)"]
+        pitch = data_init_state["Attitude"]["Pitch (deg)"]
+        yaw = data_init_state["Attitude"]["Yaw (deg)"]
+
+        R_BO = euler_ocr_to_sbc(roll, pitch, yaw)
+
+        ang_vel_B_BO = np.deg2rad(data_init_state["AngularVelocity (wrt ORC in SBC) (deg/s)"])
+
+        orbit_ang_vel = np.linalg.norm(v_ECI)/np.linalg.norm(r_ECI)
+        init_ang_vel_B_BI = ang_vel_B_BO + R_BO.apply(np.array((0, -orbit_ang_vel, 0)))
+
+        return cls(Spacecraft.from_dict(data["SpacecraftParams"]), (tle1, tle2), R_BO,
+                   init_ang_vel_B_BI, dt, t0, tf, enable_viz, enable_log, enable_disturbance_torques, enable_disturbance_forces)
+
+    def to_json(self, file_path: str):
+        data = {}
+
+        data["Simulation"] = {
+            "Start": self.t0.isoformat(),
+            "Stepsize": str(self.dt),
+            "Duration": str(self.tf - self.t0),
+            "DisturbanceTorques": self.enable_disturbance_torques,
+            "DisturbanceForces": self.enable_disturbance_forces
+        }
+
+        r_eci = self.inital_state[0:3]
+        v_eci = self.inital_state[3:6]
+        q_BI = self.inital_state[6:10]
+        omega_BI_B = self.inital_state[10:13]
+
+        R_BO = orc_to_sbc(q_BI, r_eci, v_eci)
+
+        pitch, roll, yaw = R_BO.as_euler('XYZ', degrees=True)
+
+        orbit_ang_vel = np.linalg.norm(v_eci) / np.linalg.norm(r_eci)
+        omega_OI_B = R_BO.apply(np.array([0, -orbit_ang_vel, 0]))
+        ang_vel_B_BO = omega_BI_B - omega_OI_B
+
+        data["InitialState"] = {
+            "TLE": {
+                "Line 1": self.initial_tle[0],
+                "Line 2": self.initial_tle[1]
+            },
+            "Attitude": {
+                "Roll (deg)": float(roll),
+                "Pitch (deg)": float(pitch),
+                "Yaw (deg)": float(yaw)
+            },
+            "AngularVelocity (wrt ORC in SBC) (deg/s)": np.rad2deg(ang_vel_B_BO).tolist()
+        }
+
+        data["SpacecraftParams"] = self.sat.to_dict()
+
+        with open(file_path, "w") as f:
+            json.dump(data, f, indent=2)
 
     def run(self):
         state = self.inital_state
@@ -122,8 +174,8 @@ class Simulation:
 
         with tqdm(total=(self.tf - self.t0).total_seconds()/60, desc="Simulation time", unit="sim min") as pbar:
             while t <= self.tf:
-    
-                # TODO: find cleaner solution for updating sensors and visualization 
+
+                # TODO: find cleaner solution for updating sensors and visualization
                 r_eci = state[0:3]
                 v_eci = state[3:6]
                 q_BI = state[6:10]
@@ -138,12 +190,12 @@ class Simulation:
 
                 lat, lon, alt = eci_to_geodedic(r_eci)
 
-                rho: float = self.atmosphere_density(t, lat, lon, alt)  #type: ignore
-                B: np.ndarray = self.magnetic_field(t, lat, lon, alt)  #type: ignore
+                rho: float = self.atmosphere_density(t, lat, lon, alt)  # type: ignore
+                B: np.ndarray = self.magnetic_field(t, lat, lon, alt)  # type: ignore
 
-                sun_pos: np.ndarray = self.sun_position(t) #type: ignore
+                sun_pos: np.ndarray = self.sun_position(t)  # type: ignore
                 in_shadow = env.is_in_shadow(r_eci, sun_pos)
-                moon_pos: np.ndarray = self.moon_position(t) #type: ignore
+                moon_pos: np.ndarray = self.moon_position(t)  # type: ignore
 
                 self.sat.sun_sensor.measure(t, sun_pos)
                 self.sat.magnetometer.measure(t, B)
@@ -151,41 +203,41 @@ class Simulation:
                 self.sat.gyro.measure(t, omega)
                 for i, rw in enumerate(self.sat.rw_speed_sensors):
                     rw.measure(t, omega_rws[i])
-                    
+
                 # Flight software (FSW)
                 sun_mea, new_sun_mea = self.sat.sun_sensor.read(t)
-                mag_mea, new_mag_mea =self.sat.magnetometer.read(t)
+                mag_mea, new_mag_mea = self.sat.magnetometer.read(t)
                 gps_mea, new_gps_mea = self.sat.gps.read(t)
                 gyro_mea, new_gyro_mea = self.sat.gyro.read(t)
                 omega_rw_mea, new_omega_rw_mea = zip(*[rw.read(t) for rw in self.sat.rw_speed_sensors])
-    
-                # self.orbital_estimator.pedict(t) 
+
+                # self.orbital_estimator.pedict(t)
                 self.att_ekf.predict(t, gyro_mea)
 
                 # if new_gps_mea:
                 #     self.orbital_estimator.update_gps(t, gps_mea)
-                r_eci_est, v_eci_est = state[:3], state[3:6] #self.orbital_estimator.get_state()
-                
+                r_eci_est, v_eci_est = state[:3], state[3:6]  # self.orbital_estimator.get_state()
+
                 if new_sun_mea:
                     self.att_ekf.update_sun(t, sun_mea)
                 if new_mag_mea:
                     self.att_ekf.update_mag(t, mag_mea, r_eci_est)
 
-                
                 state_est = self.att_ekf.get_state()
-    
+
                 # TODO: controllers
                 u_mag = np.zeros(3)
                 u_rw = np.zeros(3)
 
                 u = np.concatenate((u_mag, u_rw))
 
-                self.state_logger.log([t] + list(state))
-                self.input_logger.log([t] + list(u))
+                if self.enable_log:
+                    self.state_logger.log([t] + list(state))
+                    self.input_logger.log([t] + list(u))
 
                 next_state = rk4_step(self.world_dynamics, state, u, t, self.dt)
 
-                next_state[6:10] /= np.linalg.norm(next_state[6:10]) # normalize quaternion
+                next_state[6:10] /= np.linalg.norm(next_state[6:10])  # normalize quaternion
 
                 t += self.dt
                 state = next_state
@@ -193,7 +245,6 @@ class Simulation:
                 if self.enable_viz and int((t - self.t0).total_seconds()) % 3 == 0:
                     self.viz.update(self.sat.surfaces, R_BO, R_OI, R_OI.apply(v_eci))
                 pbar.update(self.dt.total_seconds() / 60)
-
 
     def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime):
         """
@@ -223,7 +274,7 @@ class Simulation:
         omega_rws = x[13:16]
         rws_curr = x[16:19]
         mag_curr = x[19:22]
-        
+
         u_mag = u[:3]
         u_rw = u[3:6]
 
@@ -232,12 +283,12 @@ class Simulation:
 
         lat, lon, alt = eci_to_geodedic(r_eci)
 
-        rho: float = self.atmosphere_density(t, lat, lon, alt)  #type: ignore
-        B: np.ndarray = self.magnetic_field(t, lat, lon, alt)  #type: ignore
+        rho: float = self.atmosphere_density(t, lat, lon, alt)  # type: ignore
+        B: np.ndarray = self.magnetic_field(t, lat, lon, alt)  # type: ignore
 
-        sun_pos: np.ndarray = self.sun_position(t) #type: ignore
+        sun_pos: np.ndarray = self.sun_position(t)  # type: ignore
         in_shadow = env.is_in_shadow(r_eci, sun_pos)
-        moon_pos: np.ndarray = self.moon_position(t) #type: ignore
+        moon_pos: np.ndarray = self.moon_position(t)  # type: ignore
 
         F_grav = dis.non_spherical_gravity_forces(r_eci, self.sat.m)
         F_third = dis.third_body_forces(r_eci, self.sat.m, sun_pos, moon_pos)
@@ -249,7 +300,7 @@ class Simulation:
             tau_gg = np.zeros(3)
             tau_aero = np.zeros(3)
             tau_SRP = np.zeros(3)
-        
+
         if not self.enable_disturbance_forces:
             F_grav = np.zeros(3)
             F_third = np.zeros(3)
@@ -257,7 +308,8 @@ class Simulation:
             F_SRP = np.zeros(3)
 
         if self.enable_actuators:
-            tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega)) for i, rw in enumerate(self.sat.rws)]) # type: ignore
+            tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega))
+                               for i, rw in enumerate(self.sat.rws)])  # type: ignore
             tau_mag = sum([np.array(mag.torque(mag_curr[i], B)) for i, mag in enumerate(self.sat.mag)])
         else:
             tau_rw = np.zeros(3)
@@ -284,7 +336,7 @@ class Simulation:
         return dx
 
 
-def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray], 
+def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray],
              x: np.ndarray, u: np.ndarray, t: datetime.datetime, dt: datetime.timedelta) -> np.ndarray:
     """
     Classic 4th-order Runge-Kutta integrator.
@@ -315,15 +367,15 @@ def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray
     k3 = f(x + 0.5 * dt_float * k2, u, t + 0.5 * dt)
     k4 = f(x + dt_float * k3, u, t + dt)
 
-    return x + (dt_float/ 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+    return x + (dt_float / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
 
 if __name__ == "__main__":
-    eos_file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tudsat-trace_eos.json")
-    
-    sim = Simulation.from_json(eos_file_path)
+    file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "src", "simulation_config.json")
 
-    sim.tf = sim.t0 + datetime.timedelta(hours = 1)
-    sim.dt = datetime.timedelta(seconds = 0.1)
+    sim = Simulation.from_json(file_path, enable_viz=False, enable_log=True)
+
+    sim.tf = sim.t0 + datetime.timedelta(hours=10)
+    sim.dt = datetime.timedelta(seconds=0.2)
 
     sim.run()

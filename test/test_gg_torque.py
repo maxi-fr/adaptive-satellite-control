@@ -3,7 +3,7 @@ from scipy.spatial.transform import Rotation
 from disturbances import MU
 from scipy.spatial.transform import Rotation as R
 from simulation import Simulation, rk4_step
-from satellite import Spacecraft, replace_orientation_matrices
+from utils import replace_orientation_matrices
 from kinematics import eci_to_geodedic, orc_to_eci, orc_to_sbc, quaternion_kinematics, euler_ocr_to_sbc
 import disturbances as dis
 import environment as env
@@ -42,7 +42,7 @@ eos_data.columns
 quat_OB = eos_data[['Q1', 'Q2', 'Q3', 'Q4']]
 quat_OB /= np.linalg.norm(quat_OB, axis=1, keepdims=True)
 
-omega_BO_deg = eos_data[['X (deg/s)', 'Y (deg/s)', 'Z (deg/s)']]
+omega_B_BI_deg = eos_data[['X (deg/s)', 'Y (deg/s)', 'Z (deg/s)']]
 
 euler_OB = eos_data[['Roll (deg)', 'Pitch (deg)', 'Yaw (deg)']]
 
@@ -61,12 +61,12 @@ vel_arr = teme_to_gcrs(time, np.array(vel))
 
 qq_torque = to_datetime(pd.read_csv(r"EOS Sim Data\Sim2\gg_torque.CSV"))
 
-with open(os.path.join(config_imports.PROJECT_DIR, "test", "tudsat-trace_eos.json"), "r") as f:
+with open(os.path.join(config_imports.PROJECT_DIR, "tudsat-trace_eos.json"), "r") as f:
     eos_file = json.load(f)
 
 sim_init_data: dict = replace_orientation_matrices(eos_file)
 
-sim = Simulation.from_json(os.path.join(config_imports.PROJECT_DIR, "test", "tudsat-trace_eos.json"))
+sim = Simulation.from_json(os.path.join(config_imports.PROJECT_DIR, "tudsat-trace_eos.json"))
 sat = sim.sat
 
 q_BI_true = np.empty((len(time), 4))

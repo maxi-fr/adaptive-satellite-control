@@ -24,7 +24,7 @@ class Spacecraft:
     """
 
     def __init__(self, m, J_B, surfaces: list[Surface], rws: list[ReactionWheel], magnetorquers: list[Magnetorquer],
-                 sun_sensor: SunSensor, magnetometer: Magnetometer, gps: GPS, accelerometer: Accelerometer, gyro: Gyroscope,
+                 sun_sensor: SunSensor, magnetometer: Magnetometer, gps: GPS, gyro: Gyroscope,
                  rw_speed_sensors: list[RW_tachometer]) -> None:
         """
         Initialize the Spacecraft object.
@@ -47,8 +47,6 @@ class Spacecraft:
             Magnetometer object.
         gps : GPS
             GPS receiver object.
-        accelerometer : Accelerometer
-            Accelerometer object.
         gyro : Gyroscope
             Gyroscope object.
         rw_speed_sensors : list[RW_tachometer]
@@ -60,79 +58,95 @@ class Spacecraft:
         self.sun_sensor = sun_sensor
         self.magnetometer = magnetometer
         self.gps = gps
-        self.accelerometer = accelerometer
         self.gyro = gyro
         self.rw_speed_sensors = rw_speed_sensors
 
         self.rws = rws
         self.mag = magnetorquers
 
-        J_rw = sum([rws[i].inertia * rws[i].spin_axis @ rws[i].spin_axis.T 
+        J_rw = sum([rws[i].inertia * rws[i].axis @ rws[i].axis.T 
                        for i in range(len(rws))])
         
         self.J_tilde = self.J_B - J_rw
         self.surfaces = surfaces
 
+
     @classmethod
-    def from_eos_file(cls, data: dict, dt):
+    def from_dict(cls, data: dict):
         """
-        Creates a Spacecraft instance from a parsed EOS JSON configuration.
-
-        Parameters
-        ----------
-        data : dict
-            Dictionary containing the parsed EOS model data.
-        dt : float
-            Simulation time step [s].
-
-        Returns
-        -------
-        Spacecraft
-            An initialized Spacecraft instance.
+        Creates a Spacecraft instance from a dictionary.
         """
-        #TODO: correctly initialize sensors and actuators
+        m = data["Mass"]
+        J_B = np.array(data["Inertia"])
+
+        surfaces = [Surface.from_dict(n, s) for n, s in data["Surfaces"].items()]
+
+        rws = []
+        if "Actuators" in data and "ReactionWheels" in data["Actuators"]:
+            for rw in data["Actuators"]["ReactionWheels"]:
+                rws.append(ReactionWheel(rw["max_torque"], rw["max_rpm"], rw["inertia"], np.array(rw["axis"]), rw.get("max_current", 1.0), rw.get("tau_current", 0.1), rw.get("torque_constant", None)))
+
+        magnetorquers = []
+        if "Actuators" in data and "Magnetorquers" in data["Actuators"]:
+            for mtq in data["Actuators"]["Magnetorquers"]:
+                magnetorquers.append(Magnetorquer(mtq["max_dipole"], np.array(mtq["axis"]), mtq.get("max_current", 1.0), mtq.get("tau_current", 0.01)))
+
+        sensors = data.get("Sensors", {})
+
+        sun_conf = sensors.get("SunSensor", {})
+        sun_sensor = SunSensor(sun_conf.get("frequency", 1.0), sigma_sq=sun_conf.get("sigma_sq", 0.0))
+
+        mag_conf = sensors.get("Magnetometer", {})
+        magnetometer = Magnetometer(mag_conf.get("frequency", 2.0), sigma_sq=mag_conf.get("sigma_sq", 0.0),
+                                    const_bias=np.array(mag_conf.get("const_bias", [0, 0, 0])))
+
+        gps_conf = sensors.get("GPS", {})
+        gps = GPS(gps_conf.get("frequency", 0.2), sigma_sq=gps_conf.get("sigma_sq", 0.0))
+
+        gyro_conf = sensors.get("Gyroscope", {})
+        gyro = Gyroscope(gyro_conf.get("frequency", 10.0), sigma_sq=gyro_conf.get("sigma_sq", 0.0),
+                         bias_sigma_sq=gyro_conf.get("bias_sigma_sq", 0.0))
+
+        rw_speed_sensors = []
+        if "RW_tachometers" in sensors:
+            for tacho_conf in sensors["RW_tachometers"]:
+                rw_speed_sensors.append(RW_tachometer(tacho_conf.get("frequency", 5.0), sigma_sq=tacho_conf.get("sigma_sq", 0.0)))
+
+        return cls(m, J_B, surfaces, rws, magnetorquers, sun_sensor, magnetometer, gps, gyro, rw_speed_sensors)
+
+    def to_dict(self):
+        """
+        Converts the Spacecraft instance to a dictionary.
+        """
+        data = {
+            "Mass": self.m,
+            "Inertia": self.J_B.tolist(),
+            "Surfaces": {s.name: s.to_dict() for s in self.surfaces},
+            "Sensors": {},
+            "Actuators": {}
+        }
+
+        if self.sun_sensor is not None:
+            data["Sensors"]["SunSensor"] = self.sun_sensor.to_dict()
+
+        if self.magnetometer is not None:
+            data["Sensors"]["Magnetometer"] = self.magnetometer.to_dict()
+        if self.gps is not None:
+            data["Sensors"]["GPS"] = self.gps.to_dict()
+
+        if self.gyro is not None:
+            data["Sensors"]["Gyroscope"] = self.gyro.to_dict()
+
+        if self.rw_speed_sensors:
+            data["Sensors"]["RW_tachometers"] = [rw.to_dict() for rw in self.rw_speed_sensors]
+
+        if self.rws:
+            data["Actuators"]["ReactionWheels"] = [rw.to_dict() for rw in self.rws]
+
+        if self.mag:
+            data["Actuators"]["Magnetorquers"] = [mag.to_dict() for mag in self.mag]
         
-        trace = data["ModelObjects"]["TRACE"]
-
-        m = trace["StructureMass"]
-        J_B = string_to_matrix(trace["StructureMomentOfInertia"])
-
-        surfaces = [Surface.from_eos_panel(v) for k, v in data["ModelObjects"].items() if "panel" in k.lower()]
-        # Reaction Wheels
-        RW_MAX_TORQUE = 2e-3  # [N·m]
-        RW_MAX_RPM = 6000  # [rpm]
-        RW_INERTIA = 2.82e-6  # [kg·m^2]
-        rws = [
-            ReactionWheel(RW_MAX_TORQUE, RW_MAX_RPM, RW_INERTIA, np.array([-1, 0, 0])),  # -X
-            ReactionWheel(RW_MAX_TORQUE, RW_MAX_RPM, RW_INERTIA, np.array([0, 1, 0])),  # +Y
-            ReactionWheel(RW_MAX_TORQUE, RW_MAX_RPM, RW_INERTIA, np.array([0, 0, 1])),  # +Z
-        ]
-        # Magnetorquers
-        MTQ_XY = 0.3  # [A·m^2]  CR0003
-        MTQ_Z = 0.2  # [A·m^2]  CR0002
-        magnetorquers = [
-            Magnetorquer(MTQ_XY, np.array([-1, 0, 0])),  # -X
-            Magnetorquer(MTQ_XY, np.array([0, 1, 0])),  # +Y
-            Magnetorquer(MTQ_Z, np.array([0, 0, 1])),  # +Z
-        ]
-        # Sensor sampling frequencies [Hz]
-        GYRO_FREQUENCY = 10.0
-        MAG_FREQUENCY = 2.0
-        SUN_FREQUENCY = 1.0
-        GPS_FREQUENCY = 0.2
-        ACC_FREQUENCY = 10.0
-        RW_TACHO_FREQ = 5.0
-
-        # Sensors
-        sun_sensor = SunSensor(SUN_FREQUENCY, sigma_sq=0.0)
-        magnetometer = Magnetometer(MAG_FREQUENCY, sigma_sq=0.0, const_bias=np.zeros(3))
-        gps = GPS(GPS_FREQUENCY, sigma_sq=0.0)
-        accelerometer = Accelerometer(ACC_FREQUENCY, sigma_sq=0.0, bias_sigma_sq=0.0)
-        gyro = Gyroscope(GYRO_FREQUENCY, sigma_sq=0.0, bias_sigma_sq=0.0)
-        rw_speed_sensors = [RW_tachometer(RW_TACHO_FREQ, sigma_sq=0.0) for _ in rws]
-
-        return cls(m, J_B, surfaces, rws, magnetorquers, sun_sensor, magnetometer, gps, accelerometer, gyro, rw_speed_sensors)
-        
+        return data
 
     def orbit_dynamics(self, r_eci: np.ndarray, ctrl_force: np.ndarray, dist_force: np.ndarray):
         """

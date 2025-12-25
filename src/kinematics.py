@@ -36,7 +36,7 @@ def euler_ocr_to_sbc(roll_deg: float, pitch_deg: float, yaw_deg: float) -> R:
     """
     Creates a Rotation object from Euler angles (Roll, Pitch, Yaw).
 
-    The rotation sequence is defined as Y-X-Z (Pitch-Roll-Yaw).
+    The intrinsic rotation sequence is defined as Y-X-Z (Pitch-Roll-Yaw).
 
     Parameters
     ----------
@@ -53,7 +53,7 @@ def euler_ocr_to_sbc(roll_deg: float, pitch_deg: float, yaw_deg: float) -> R:
         Rotation object representing the transformation from ORC to SBC.
     """
 
-    R_BO = R.from_euler('yxz', [pitch_deg, roll_deg, yaw_deg], degrees=True)
+    R_BO = R.from_euler('YXZ', [pitch_deg, roll_deg, yaw_deg], degrees=True)
 
     return R_BO
 

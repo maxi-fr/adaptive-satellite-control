@@ -1,0 +1,154 @@
+{
+  "Simulation": {
+    "Start": "2024-01-01T12:00:00",
+    "Stepsize": "0:00:00.2",
+    "Duration": "0:10:00"
+  },
+  "InitialState": {
+    "TLE": {
+      "Line 1": "1 25544U 98067A   24001.50000000  .00000000  00000-0  00000-0 2    07",
+      "Line 2": "2 25544 097.6000 010.0000 0001000 000.0000 000.0000 15.25000000000009"
+    },
+    "Attitude": {
+      "Roll (deg)": 0.0,
+      "Pitch (deg)": 0.0,
+      "Yaw (deg)": 0.0
+    },
+    "AngularVelocity (wrt ORC in SBC) (deg/s)": [0.0, 0.0, 0.0]
+  },
+  "SpacecraftParams": {
+    "Mass": 2.304,
+    "Inertia": [
+      [0.012286, -0.000065, -0.000236],
+      [-0.000065, 0.012726, -0.000039],
+      [-0.000236, -0.000039, 0.005707]
+    ],
+    "Actuators": {
+      "ReactionWheels": [
+        {
+          "max_torque": 0.002,
+          "max_rpm": 6000,
+          "inertia": 2.82e-6,
+          "axis": [-1, 0, 0]
+        },
+        {
+          "max_torque": 0.002,
+          "max_rpm": 6000,
+          "inertia": 2.82e-6,
+          "axis": [0, 1, 0]
+        },
+        {
+          "max_torque": 0.002,
+          "max_rpm": 6000,
+          "inertia": 2.82e-6,
+          "axis": [0, 0, 1]
+        }
+      ],
+      "Magnetorquers": [
+        {
+          "max_dipole": 0.3,
+          "axis": [-1, 0, 0]
+        },
+        {
+          "max_dipole": 0.3,
+          "axis": [0, 1, 0]
+        },
+        {
+          "max_dipole": 0.2,
+          "axis": [0, 0, 1]
+        }
+      ]
+    },
+    "Sensors": {
+      "SunSensor": { "frequency": 1.0, "sigma_sq": 0.0 },
+      "Magnetometer": { "frequency": 2.0, "sigma_sq": 0.0, "const_bias": [0.0, 0.0, 0.0] },
+      "GPS": { "frequency": 0.2, "sigma_sq": 0.0 },
+      "Gyroscope": { "frequency": 10.0, "sigma_sq": 0.0, "bias_sigma_sq": 0.0 },
+      "RW_tachometers": [{ "frequency": 5.0, "sigma_sq": 0.0 }, { "frequency": 5.0, "sigma_sq": 0.0 }, { "frequency": 5.0, "sigma_sq": 0.0 }]
+    },
+    "Surfaces": {
+      "Panel -X": {
+        "DimX": 0.14,
+        "DimY": 0.1,
+        "Origin": [-0.05, 0.05, 0.02],
+        "Rotation (Surface frame to Body)": [[0.0, 0.0, -1.0], [0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]]
+      },
+      "Panel +X": {
+        "DimX": 0.14,
+        "DimY": 0.1,
+        "Origin": [0.05, -0.05, 0.02],
+        "Rotation (Surface frame to Body)": [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+      },
+      "Panel -Y": {
+        "DimX": 0.04,
+        "DimY": 0.1,
+        "Origin": [0.05, -0.05, -0.02],
+        "Rotation (Surface frame to Body)": [[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]]
+      },
+      "Panel +Y": {
+        "DimX": 0.04,
+        "DimY": 0.1,
+        "Origin": [0.05, 0.05, 0.02],
+        "Rotation (Surface frame to Body)": [[0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]]
+      },
+      "Panel -Z": {
+        "DimX": 0.1,
+        "DimY": 0.1,
+        "Origin": [0.05, -0.05, -0.12],
+        "Rotation (Surface frame to Body)": [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]]
+      },
+      "Solar Panel +Z": {
+        "Origin": [0.05, 0.05, 0.126],
+        "Rotation (Surface frame to Body)": [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]]
+      },
+      "Solar Panel -Y1": {
+        "Origin": [0.05, -0.05, -0.12],
+        "Rotation (Surface frame to Body)": [[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]]
+      },
+      "Solar Panel -Y2": {
+        "Origin": [0.05, -0.05, 0.02],
+        "Rotation (Surface frame to Body)": [[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]]
+      },
+      "Solar Panel +Y1": {
+        "Origin": [0.05, 0.05, 0.12],
+        "Rotation (Surface frame to Body)": [[0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]]
+      },
+      "Solar Panel +Y2": {
+        "Origin": [0.05, 0.05, -0.02],
+        "Rotation (Surface frame to Body)": [[0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]]
+      },
+      "Solar Panel +X": {
+        "Origin": [0.05, -0.05, 0.12],
+        "Rotation (Surface frame to Body)": [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+      },
+      "Solar Panel -X": {
+        "Origin": [-0.05, 0.05, 0.12],
+        "Rotation (Surface frame to Body)": [[0.0, 0.0, -1.0], [0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]]
+      },
+      "Antenna Panel 1": {
+        "DimX": 0.006,
+        "DimY": 0.1,
+        "Origin": [0.05, -0.05, 0.126],
+        "Rotation (Surface frame to Body)": [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+      },
+      "Antenna Panel 2": {
+        "DimX": 0.006,
+        "DimY": 0.1,
+        "Origin": [0.05, 0.05, 0.126],
+        "Rotation (Surface frame to Body)": [[0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]]
+      },
+      "Antenna Panel 3": {
+        "DimX": 0.006,
+        "DimY": 0.1,
+        "Origin": [-0.05, 0.05, 0.126],
+        "Rotation (Surface frame to Body)": [[0.0, 0.0, -1.0], [0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]]
+      },
+      "Antenna Panel 4": {
+        "DimX": 0.006,
+        "DimY": 0.1,
+        "Origin": [0.05, -0.05, 0.12],
+        "Rotation (Surface frame to Body)": [[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]]
+      }
+    }
+  }
+}

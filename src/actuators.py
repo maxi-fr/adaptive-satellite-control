@@ -7,7 +7,7 @@ class ReactionWheel:
         max_torque: float,
         max_rpm: float,
         inertia: float,
-        spin_axis: np.ndarray,
+        axis: np.ndarray,
         max_current: float = 1.0,
         tau_current: float = 0.1,
         torque_constant: float | None = None,
@@ -18,11 +18,11 @@ class ReactionWheel:
         self.inertia = float(inertia)
 
         # normalise spin axis to unit vector in body frame
-        spin_axis = np.asarray(spin_axis, dtype=float).reshape(3)
-        norm = np.linalg.norm(spin_axis)
+        axis = np.asarray(axis, dtype=float).reshape(3)
+        norm = np.linalg.norm(axis)
         if norm == 0.0:
-            raise ValueError("ReactionWheel spin_axis must be non-zero!")
-        self.spin_axis = spin_axis / norm
+            raise ValueError("ReactionWheel axis must be non-zero!")
+        self.axis = axis / norm
 
         # simple current model (first-order)
         self.max_current = float(max_current)
@@ -37,6 +37,11 @@ class ReactionWheel:
 
         # store mech. speed in rad/s
         self.max_omega = 2.0 * np.pi * self.max_rpm / 60.0
+
+    def to_dict(self):
+        data = self.__dict__
+        data["axis"] = self.axis.tolist()
+        return data
 
     # algebraic way of calculating the moment vector affecting the RW
     def torque_ang_momentum(
@@ -54,10 +59,10 @@ class ReactionWheel:
         tau_m = self.K_t * i_sat
         tau_m = float(np.clip(tau_m, -self.max_torque, self.max_torque))
         # torque vector along spin axis, applied to the wheel
-        tau_rw = tau_m * self.spin_axis
+        tau_rw = tau_m * self.axis
         # internal angular momentum of this wheel in body frame:
-        omega_parallel_body = float(np.dot(self.spin_axis, omega_body))
-        h_wheel = self.inertia * (float(omega_w) + omega_parallel_body) * self.spin_axis
+        omega_parallel_body = float(np.dot(self.axis, omega_body))
+        h_wheel = self.inertia * (float(omega_w) + omega_parallel_body) * self.axis
 
         return tau_rw, h_wheel
 
@@ -82,7 +87,7 @@ class ReactionWheel:
 
         # mechanical dynamics (no friction)
         # => dot{Omega} = tau_m / J_w - s^T dot{omega}_B
-        domega_w = tau_m / self.inertia - float(np.dot(self.spin_axis, omega_dot_body))
+        domega_w = tau_m / self.inertia - float(np.dot(self.axis, omega_dot_body))
 
         return domega_w, di_dt
 
@@ -91,20 +96,26 @@ class Magnetorquer:
     def __init__(
         self,
         max_moment: float,
-        spin_axis: np.ndarray,
+        axis: np.ndarray,
         max_current: float = 1.0,
         tau_current: float = 0.01,
     ) -> None:
         self.max_moment = float(max_moment)
         # making sure it's 3-sized 1D vector
-        spin_axis = np.asarray(spin_axis, dtype=float).reshape(3)
-        norm = np.linalg.norm(spin_axis)
+        axis = np.asarray(axis, dtype=float).reshape(3)
+        norm = np.linalg.norm(axis)
         if norm == 0.0:
-            raise ValueError("Magnetorquer spin_axis must be non-zero!")
-        self.spin_axis = spin_axis / norm
+            raise ValueError("Magnetorquer axis must be non-zero!")
+        self.axis = axis / norm
 
         self.max_current = float(max_current)
         self.tau_current = float(tau_current)
+
+    def to_dict(self):
+        data = self.__dict__
+        data["axis"] = self.axis.tolist()
+        return data
+
 
     # magnetic torque calculations
     def torque(self, i: float, B_body: np.ndarray) -> np.ndarray:
@@ -113,8 +124,8 @@ class Magnetorquer:
         # saturate current and corresponding dipole magnitude
         i_sat = float(np.clip(i, -self.max_current, self.max_current))
         m_scalar = self.max_moment * (i_sat / self.max_current)
-        # dipole along spin_axis
-        m_vec = m_scalar * self.spin_axis
+        # dipole along axis
+        m_vec = m_scalar * self.axis
         # torque tau = m × B
         tau_mag = np.cross(m_vec, B_body)
         return tau_mag
