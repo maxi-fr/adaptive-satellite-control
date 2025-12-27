@@ -45,7 +45,7 @@ class Controller(ABC):
         return np.concatenate((q_err_full[:3], omega_err, h_w)) 
     
     @abstractmethod
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None, *args: Any) -> np.ndarray:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None) -> np.ndarray:
         """
         Calculates the control input commands.
 
@@ -70,7 +70,7 @@ class ZeroInputs(Controller):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None, *args: Any) -> np.ndarray:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None) -> np.ndarray:
         """
         Calculates the control input commands.
 
@@ -140,7 +140,7 @@ class PI(Controller):
         self.m = m
 
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None, *args: Any) -> np.ndarray:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None) -> np.ndarray:
         """
         Calculates the control input.
 
@@ -311,7 +311,7 @@ class GainScheduling(Controller):
         return i, j
 
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None, *args: Any) -> np.ndarray:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None) -> np.ndarray:
         """
         Calculates the control input using gain scheduling.
 
@@ -328,7 +328,7 @@ class GainScheduling(Controller):
             Control input vector.
         """
         x = self.calc_nadir_state_error(att_state, orbit_state)
-        beta = self.calc_scheduling_param(x, *args)
+        beta = self.calc_scheduling_param(x)
 
         i, j = self.closest_operating_points(beta)
 
@@ -357,7 +357,7 @@ class FeedforwardController(Controller):
         self.u_max = u_max
 
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: float | None = None, *args: Any) -> np.ndarray:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: float | None = None) -> np.ndarray:
         x = self.calc_input_cmds(att_state, orbit_state)
         q_err = x[:3]
         omega_err = x[3:]
@@ -373,10 +373,124 @@ class FeedforwardController(Controller):
     
 
 class MPC(Controller):
-    def __init__(self, f: ca.Function, f_jac_x: ca.Function, f_jac_u: ca.Function) -> None:
+    def __init__(self, F: ca.Function, n_steps) -> None:
         super().__init__()
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: float | None = None, *args: Any) -> np.ndarray[Tuple[Any], np.dtype[np.float64]]:
+        self.F = F
+        self.n_steps = n_steps
+
+        self.X_last = None
+        self.U_last = None
+
+    def cost_function(self, X, U):
+        #TODO: implement cost function
+
+        # something like this:
+
+        # cost = 0
+        # for k in range(self.n_steps):
+        #     cost += ca.mtimes([X[:, k].T, Q, X[:, k]])
+        #     cost += ca.mtimes([U[:, k].T, R, U[:, k]])
+        
+        # cost += ca.mtimes([X[:, self.n_steps].T, Q, X[:, self.n_steps]])
+
+        return cost
+
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: float | None = None) -> np.ndarray[Tuple[Any], np.dtype[np.float64]]:
+        # TODO: See if optimal control problem can be turned into a ca.Function and compiled for computational speed
+
+        x0 = self.calc_nadir_state_error(att_state, orbit_state)
+        
+        nx, nu = x0.size, 6
+
+        opti = ca.Opti()
+
+        X = opti.variable(nx, self.n_steps + 1)
+        U = opti.variable(nu, self.n_steps)        
+
+        #TODO: implement cost function
+        opti.minimize(self.cost_function(...))
+
+        # constraints
+        opti.subject_to(X[:, 0] == x0)
+        for k in range(self.n_steps):
+            opti.subject_to(X[:, k+1] == self.F(X[:, k], U[:, k])) 
+
+        # TODO: implement input constraints
+        opti.subject_to(opti.bounded(...))
+        opti.subject_to(opti.bounded(...))
+        opti.subject_to(opti.bounded(...))
+
+        if self.X_last is not None and self.U_last is not None:
+            opti.set_initial(X[:, :-1], self.X_last[:, 1:])
+            opti.set_initial(X[:, -1], self.X_last[:, -1])
+            opti.set_initial(U[:, :-1], self.U_last[:, 1:])
+            opti.set_initial(U[:, -1], self.U_last[:, -1]) 
+
+        verbose = True
+        opts = {
+            'qpsol': 'qrqp',
+            'print_header': verbose,
+            'print_iteration': verbose,
+            'print_time': verbose,
+            'qpsol_options': {
+                'print_iter': verbose,
+                'print_header': verbose,
+                'print_info': verbose,
+                'max_iter': 100
+            }
+        }
+        try:
+            try:
+                opti.solver('sqpmethod', opts)
+                sol = opti.solve()
+                
+            except Exception as e:
+                print(e)
+                opti.solver('ipopt')
+
+                sol = opti.solve()
+        except Exception as e:
+            self.debug(opti, X, U)    
+            raise e
+
+        self.X_last = sol.value(X)
+        self.U_last = sol.value(U)
+
+        #TODO: for logging maybe: sol.value(X), sol.value(U)
+
+        return sol.value(U)[0]
+
+
+    def debug(self, opti, X, U):
+
+        X = opti.debug.value(X)
+        U = opti.debug.value(U)
+
+        print("-----------------------------------------")
+        print(opti.debug)
+        print("X")
+        print(X[:3, :].T, "\n")
+
+
+        print("U")
+        print(opti.debug.value(U).T)
+
+        print("Infeasibilites:")
+        print(opti.debug.show_infeasibilities())
+
+
+        # TODO: some kind of debugging plots
+        # fig, (ax1, ax2, ax3) = plt.subplots(3, 1)
+        # ax1.plot(range(self.n_steps+1), X[:3, :].T)
+        # ax2.plot(range(self.n_steps+1), obs_state_pred[:, :3])
+        # ax3.plot(range(self.n_steps), U.T)
+
+        # ax1.set_title("Position UAV")
+        # ax2.set_title("Position Obstacle")
+        # ax3.set_title("Inputs")
+        # fig.tight_layout()
+        # fig.savefig("debug_info.png")
         
 
-        return u
+        print("-----------------------------------------")
