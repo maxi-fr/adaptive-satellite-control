@@ -369,3 +369,73 @@ def floor_time_to_minute(t: datetime.datetime) -> datetime.datetime:
     return t.replace(second=0, microsecond=0)
 def floor_time_to_second(t: datetime.datetime) -> datetime.datetime:
     return t.replace(microsecond=0)
+
+
+def weighted_pinv(M, W):
+    Winv = np.linalg.inv(W)
+    return Winv @ M.T @ np.linalg.pinv(M @ Winv @ M.T)
+
+
+def cgi_allocation(M: np.ndarray, tau_cmd: np.ndarray, u_min: np.ndarray, u_max: np.ndarray, W: np.ndarray|None=None, tol=1e-9):
+    """
+    Control allocation using the constrained-gradient inverse (CGI) method.
+    Optimizes the control input `u` to minimize `u^T W u`
+    subject to `M * u = tau_cmd` and `u_min <= u <= u_max`.
+    
+
+    Parameters
+    ----------
+    M : np.ndarray
+        Effectiveness matrix (m x n), where m is the number of controlled axes
+        and n is the number of actuators.
+    tau_cmd : np.ndarray
+        Desired control torque vector (m x 1).
+    u_min : np.ndarray
+        Minimum control input for each actuator (n x 1).
+    u_max : np.ndarray
+        Maximum control input for each actuator (n x 1).
+    W : np.ndarray, optional
+        Weighting matrix for the actuators (n x n), by default identity.
+    tol : float, optional
+        Tolerance for constraint violation, by default 1e-9.
+
+    Returns
+    -------
+    np.ndarray
+        Allocated control input vector (n x 1).
+    """
+    
+    m, n = M.shape
+    u = np.zeros(n)
+    free = np.ones(n, dtype=bool)
+    tau_res = tau_cmd.copy()
+
+    if W is None:
+        W = np.eye(n)
+
+    while True:
+        if not np.any(free):
+            break
+
+        M_avail = M[:, free]
+        W_avail = W[np.ix_(free, free)]
+
+        P = weighted_pinv(M_avail, W_avail)
+        u_hat = P @ tau_res
+
+        violated_low = u_hat < u_min[free] - tol
+        violated_high = u_hat > u_max[free] + tol
+        violated = violated_low | violated_high
+
+        if not np.any(violated):
+            u[free] = u_hat
+            break
+
+        idx_free = np.where(free)[0]
+        idx_sat = idx_free[violated]
+
+        u[idx_sat] = np.clip(u_hat[violated], u_min[idx_sat], u_max[idx_sat])
+        tau_res -= M[:, idx_sat] @ u[idx_sat]
+        free[idx_sat] = False
+
+    return u

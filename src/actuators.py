@@ -110,6 +110,7 @@ class Magnetorquer:
 
         self.max_current = float(max_current)
         self.tau_current = float(tau_current)
+        self.K_t = self.max_moment/ self.max_current
 
     def to_dict(self):
         data = self.__dict__
@@ -123,7 +124,7 @@ class Magnetorquer:
         B_body = np.asarray(B_body, dtype=float).reshape(3)
         # saturate current and corresponding dipole magnitude
         i_sat = float(np.clip(i, -self.max_current, self.max_current))
-        m_scalar = self.max_moment * (i_sat / self.max_current)
+        m_scalar = self.K_t * i_sat 
         # dipole along axis
         m_vec = m_scalar * self.axis
         # torque tau = m × B
@@ -135,3 +136,25 @@ class Magnetorquer:
         i_cmd = float(np.clip(u, -self.max_current, self.max_current))
         di_dt = (i_cmd - float(i)) / self.tau_current
         return di_dt
+    
+
+
+def to_current_commands(u: np.ndarray, B: np.ndarray, mag: list[Magnetorquer], rws: list[ReactionWheel]) -> np.ndarray:
+    """
+    
+    """
+    u_rw = u[:len(rws)]
+    u_mag = u[len(rws):]
+
+    Alpha = np.array([rw.K_t* rw.axis for rw in rws]).T
+    rw_i_cmd = np.linalg.solve(Alpha, u_rw)
+
+    B_norm = np.linalg.norm(B)
+    b = B/B_norm
+    m_cmd = np.cross(u_mag, b)/B_norm
+
+    Alpha = np.array([mag.K_t *mag.axis for mag in mag]).T
+
+    mag_i_cmd = np.linalg.solve(Alpha, m_cmd)
+
+    return np.concatenate((rw_i_cmd, mag_i_cmd))

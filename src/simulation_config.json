@@ -16,6 +16,10 @@
     },
     "AngularVelocity (wrt ORC in SBC) (deg/s)": [0.0, 0.0, 0.0]
   },
+  "Controller": {
+    "name": "ZeroInputs",
+    "params": {}
+  },
   "SpacecraftParams": {
     "Mass": 2.304,
     "Inertia": [

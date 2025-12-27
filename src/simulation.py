@@ -5,6 +5,8 @@ from typing import Callable
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 
+from actuators import to_current_commands
+import controllers
 from dynamics import SGP4
 import environment as env
 import disturbances as dis
@@ -18,10 +20,12 @@ from visualization import SatelliteVisualizer
 
 
 class Simulation:
-    def __init__(self, sat: Spacecraft, tle: tuple[str, str], initial_attitude_BO: R, initial_ang_vel_B: np.ndarray,
+    def __init__(self, sat: Spacecraft, controller: Controller, tle: tuple[str, str], initial_attitude_BO: R, initial_ang_vel_B: np.ndarray,
                  dt: datetime.timedelta, t0: datetime.datetime, tf: datetime.datetime,
                  enable_viz: bool = True, enable_log: bool = True, enable_disturbance_torques: bool = True,
                  enable_disturbance_forces: bool = True):
+        
+        self.controller = controller
 
         self.t0 = t0
         self.dt = dt
@@ -40,7 +44,7 @@ class Simulation:
         self.inital_state[6:10] = (initial_attitude_BO * orc_to_eci(self.inital_state[0:3],
                                                                     self.inital_state[3:6]).inv()
                                    ).as_quat(scalar_first=False)
-        # quaternion representing rotation from ECI to Body Frame
+        
 
         self.enable_disturbance_torques = enable_disturbance_torques
         self.enable_disturbance_forces = enable_disturbance_forces
@@ -91,6 +95,8 @@ class Simulation:
         with open(file_path, "r") as f:
             data = json.load(f)
 
+        controller = eval("controllers." + data["Controller"].name)(**data["Controller"].params)
+
         data_sim = data["Simulation"]
         t0 = datetime.datetime.fromisoformat(data_sim["Start"])
         if t0.tzinfo is None:
@@ -123,7 +129,7 @@ class Simulation:
         orbit_ang_vel = np.linalg.norm(v_ECI)/np.linalg.norm(r_ECI)
         init_ang_vel_B_BI = ang_vel_B_BO + R_BO.apply(np.array((0, -orbit_ang_vel, 0)))
 
-        return cls(Spacecraft.from_dict(data["SpacecraftParams"]), (tle1, tle2), R_BO,
+        return cls(Spacecraft.from_dict(data["SpacecraftParams"]), controller, (tle1, tle2), R_BO, #TODO: add controller
                    init_ang_vel_B_BI, dt, t0, tf, enable_viz, enable_log, enable_disturbance_torques, enable_disturbance_forces)
 
     def to_json(self, file_path: str):
@@ -223,19 +229,17 @@ class Simulation:
                 if new_mag_mea:
                     self.att_ekf.update_mag(t, mag_mea, r_eci_est)
 
-                state_est = self.att_ekf.get_state()
+                state_est = state # self.att_ekf.get_state()
 
-                # TODO: controllers
-                u_mag = np.zeros(3)
-                u_rw = np.zeros(3)
+                u = self.controller.calc_input_cmds(state_est, self.dt.total_seconds())
+                current_cmds = to_current_commands(u, B, self.sat.mag, self.sat.rws)
 
-                u = np.concatenate((u_mag, u_rw))
 
                 if self.enable_log:
                     self.state_logger.log([t] + list(state))
                     self.input_logger.log([t] + list(u))
 
-                next_state = rk4_step(self.world_dynamics, state, u, t, self.dt)
+                next_state = rk4_step(self.world_dynamics, state, current_cmds, t, self.dt)
 
                 next_state[6:10] /= np.linalg.norm(next_state[6:10])  # normalize quaternion
 
