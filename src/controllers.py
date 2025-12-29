@@ -5,6 +5,7 @@ from typing import Callable, List, Tuple, Optional, Union, Any
 import control as ct
 from scipy.spatial.transform import Rotation as R
 
+from controller_models import build_error_dynamics
 from kinematics import orc_to_sbc
 from utils import cgi_allocation
 
@@ -14,8 +15,21 @@ class Controller(ABC):
     Abstract base class for controllers.
     """
     def __init__(self) -> None:
-        self.u_min = -np.inf
-        self.u_max = np.inf
+        self.u_max = np.inf * np.ones(6)
+        self.u_min = - self.u_max
+
+    @abstractmethod
+    def to_dict(self) -> dict:
+        """
+        Converts the controller to a dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary representation of the controller.
+        """
+        raise NotImplementedError()
+    
 
     def update_actuator_limits(self, u_min: np.ndarray, u_max: np.ndarray) -> None:
         """
@@ -28,10 +42,25 @@ class Controller(ABC):
         u_max : np.ndarray
             Maximum control input vector.
         """
-        self.u_min = u_min
-        self.u_max = u_max  
+        self.u_min = np.asarray(u_min)
+        self.u_max = np.asarray(u_max)
 
     def calc_nadir_state_error(self, state_est: np.ndarray, orbit_state: np.ndarray) -> np.ndarray:
+        """
+        Calculates the state error relative to the nadir frame.
+
+        Parameters
+        ----------
+        state_est : np.ndarray
+            Current state estimation.
+        orbit_state : np.ndarray
+            Current orbit state (position and velocity).
+
+        Returns
+        -------
+        np.ndarray
+            Error state vector.
+        """
         r_eci, v_eci = orbit_state[:3], orbit_state[3:6]
 
         R_BO = orc_to_sbc(state_est[:4], r_eci, v_eci) 
@@ -45,23 +74,24 @@ class Controller(ABC):
         return np.concatenate((q_err_full[:3], omega_err, h_w)) 
     
     @abstractmethod
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None) -> np.ndarray:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray) -> np.ndarray:
         """
         Calculates the control input commands.
 
         Parameters
         ----------
-        x : np.ndarray
-            State vector.
-        dt : float, optional
-            Time step, by default None.
+        att_state : np.ndarray
+            Attitude state vector.
+        orbit_state : np.ndarray
+            Orbit state vector.
 
         Returns
         -------
         np.ndarray
             Control input vector.
         """
-        pass
+        raise NotImplementedError()
+    
 
 class ZeroInputs(Controller):
     """
@@ -70,16 +100,16 @@ class ZeroInputs(Controller):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None) -> np.ndarray:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray) -> np.ndarray:
         """
         Calculates the control input commands.
 
         Parameters
         ----------
-        x : np.ndarray
-            State vector.
-        dt : float, optional
-            Time step, by default None.
+        att_state : np.ndarray
+            Attitude state vector.
+        orbit_state : np.ndarray
+            Orbit state vector.
 
         Returns
         -------
@@ -95,7 +125,7 @@ class PI(Controller):
     """
     
     def __init__(self, K_q: np.ndarray, K_omega: np.ndarray, K_w: np.ndarray, K_q_int: np.ndarray, 
-                 operating_point: Tuple[np.ndarray, np.ndarray], m: float|None = None, u_min: float|None = None, u_max: float|None = None) -> None:
+                 operating_point: Tuple[np.ndarray, np.ndarray], dt: float, m: float|None = None) -> None:
         """
         Initializes the PI controller.
 
@@ -111,66 +141,64 @@ class PI(Controller):
             Integral gain matrix for attitude error.
         operating_point : Tuple[np.ndarray, np.ndarray]
             The operating point (x_star, u_star).
-        m : float
+        dt : float
+            Time step.
+        m : float, optional
             Anti-windup gain.
-        u_min : float
-            Minimum control input value (saturation).
-        u_max : float
-            Maximum control input value (saturation).
         """
 
 
         super().__init__()
-        self.x_star, self.u_star = operating_point[0], operating_point[1]
+        self.x_star, self.u_star = np.asarray(operating_point[0]), np.asarray(operating_point[1])
         self.q_err_int = np.zeros(3)
 
-        self.K_q = K_q
-        self.K_omega = K_omega
-        self.K_wheel = K_w
-        self.K_q_int = K_q_int
+        self.K_q = np.asarray(K_q)
+        self.K_omega = np.asarray(K_omega)
+        self.K_wheel = np.asarray(K_w)
+        self.K_q_int = np.asarray(K_q_int)
+        self.dt = dt
 
         if m is None:
             m = 1.
-        if u_min is None:
-            u_min = -np.inf
-        if u_max is None:
-            u_max = np.inf
-        self.u_min = u_min
-        self.u_max = u_max
         self.m = m
 
+    def to_dict(self) -> dict:
+        data = {
+            "K_q": self.K_q.tolist(),
+            "K_omega": self.K_omega.tolist(),
+            "K_wheel": self.K_wheel.tolist(),
+            "K_q_int": self.K_q_int.tolist(),
+            "operating_point": [self.x_star.tolist(), self.u_star.tolist()],
+            "m": self.m
+        }
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None) -> np.ndarray:
+        return data
+
+
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray) -> np.ndarray:
         """
         Calculates the control input.
 
         Parameters
         ----------
-        x : np.ndarray
-            Current state vector.
-        dt : float, optional
-            Time step, required for integral term.
+        att_state : np.ndarray
+            Attitude state vector.
+        orbit_state : np.ndarray
+            Orbit state vector.
 
         Returns
         -------
         np.ndarray
             Control input vector.
-
-        Raises
-        ------
-        ValueError
-            If dt is not provided.
         """
 
-        if dt is None:
-            raise ValueError("dt must be provided")
         D_x = self.calc_nadir_state_error(att_state, orbit_state) - self.x_star
         q_err = D_x[:3]
         omega_err = D_x[3:]
         h_w = D_x[6:]
 
 
-        self.q_err_int += q_err * dt
+        self.q_err_int += q_err * self.dt
 
         u_R = - (self.K_q @ q_err + self.K_omega @ omega_err + self.K_wheel @ h_w + self.K_q_int @ self.q_err_int)
 
@@ -178,21 +206,16 @@ class PI(Controller):
 
         self.q_err_int -= self.m * (u_R - u) # anti wind up
 
-        return u + self.u_star
+        return u + self.u_star # TODO: anti wind up needs to consider u_star as well?!
     
 class LQR(PI):
-    def __init__(self, f_x: Callable[[np.ndarray, np.ndarray], np.ndarray], f_u: Callable[[np.ndarray, np.ndarray], np.ndarray], 
-                 operating_point: Tuple[np.ndarray, np.ndarray], Q: np.ndarray, R: np.ndarray, 
-                 m: float|None = None, u_min: float|None = None, u_max: float|None = None, K_q_int: np.ndarray|None = None) -> "PI":
+    def __init__(self, operating_point: Tuple[np.ndarray, np.ndarray], Q: np.ndarray, R: np.ndarray, 
+                 m: float|None = None, dt: float|None = None, K_q_int: np.ndarray|None = None):
         """
         Creates a PI controller using LQR gains.
 
         Parameters
         ----------
-        f_x : Callable[[np.ndarray, np.ndarray], np.ndarray]
-            Function returning the Jacobian of dynamics w.r.t state (A matrix).
-        f_u : Callable[[np.ndarray, np.ndarray], np.ndarray]
-            Function returning the Jacobian of dynamics w.r.t input (B matrix).
         operating_point : Tuple[np.ndarray, np.ndarray]
             The operating point (x_star, u_star).
         Q : np.ndarray
@@ -201,10 +224,8 @@ class LQR(PI):
             Input cost matrix.
         m : float
             Anti-windup gain.
-        u_min : float
-            Minimum control input.
-        u_max : float
-            Maximum control input.
+        dt : float, optional
+            Time step.
         K_q_int : np.ndarray, optional
             Integral gain matrix for attitude error, by default None.
 
@@ -213,19 +234,37 @@ class LQR(PI):
         PI
             Initialized PI controller instance.
         """
-        A = f_x(*operating_point)
-        B = f_u(*operating_point)
+        _, _, f_x, f_u = build_error_dynamics(omega_c, J_hat, A_hat, K_t, K_mag)
+
+        A = f_x(*operating_point, B_field) # TODO: deal with B-field and so on
+        B = f_u(B_field)
+
+        self.Q = np.asarray(Q)
+        self.R = np.asarray(R)
         
         K, S, E = ct.lqr(A, B, Q, R)
 
-        if K_q_int is None:
+        if K_q_int is None or dt is None:
             K_q_int = np.zeros((K.shape[0], 3))
+            dt = 0
 
-        super().__init__(K[:, :3], K[:, 3:6], K[:, 6:9], K_q_int, operating_point, m, u_min, u_max)
+        super().__init__(K[:, :3], K[:, 3:6], K[:, 6:9], K_q_int, operating_point, dt, m)
+
+    def to_dict(self) -> dict:
+        data ={
+            "operating_point": [self.x_star.tolist(), self.u_star.tolist()],
+            "Q": self.Q,
+            "R": self.R,
+            "m": self.m,
+            "K_q_int": self.K_q_int.tolist(),
+            "dt": self.dt
+        }
+        return data
+        
 
 class AvanziniLinear(PI):
     
-    def __init__(self, k_p, k_d, k_i, k_m):
+    def __init__(self, k_p, k_d, k_i, k_m, dt, m=None):
         """
         RW for attitude stabilization and Magnetorquers for momentum dumping
         
@@ -238,7 +277,18 @@ class AvanziniLinear(PI):
         K_wheel = np.eye(3) * k_m
         K_q_int = np.eye(3) * k_i
 
-        super().__init__(K_q, K_omega, K_wheel, K_q_int, (np.zeros(9), np.zeros(6))) 
+        super().__init__(K_q, K_omega, K_wheel, K_q_int, (np.zeros(9), np.zeros(6)), dt, m) 
+
+    def to_dict(self) -> dict:
+        data = {
+            "k_p": self.K_q[0, 0],
+            "k_d": self.K_omega[0, 0],
+            "k_m": self.K_wheel[0, 0],
+            "k_i": self.K_q_int[0, 0],
+            "m": self.m,
+            "dt": self.dt
+        }
+        return data
 
 class GainScheduling(Controller):
 
@@ -281,8 +331,8 @@ class GainScheduling(Controller):
 
         self.f = f
 
-        self.Q = Q if isinstance(Q, list) else [Q] * len(self.operating_points)
-        self.R = R if isinstance(R, list) else [R] * len(self.operating_points)
+        self.Q = [np.asarray(q) for q in Q] if isinstance(Q, list) else [np.asarray(Q)] * len(self.operating_points)
+        self.R = [np.asarray(r) for r in R] if isinstance(R, list) else [np.asarray(R)] * len(self.operating_points)
 
         # for x, u, w in self.operating_points:
         #     print(f"Operating Point: x={x}, u={u}, w={w}")
@@ -291,6 +341,10 @@ class GainScheduling(Controller):
 
         #self.place_gains = [ct.place(np.array(A).squeeze(), np.array(B).squeeze(), P[i]) for i, (A, B) in enumerate(self.linear_models)]
         self.lqr_gains = [ct.lqr(np.squeeze(A), np.squeeze(B), self.Q[i], self.R[i])[0] for i, (A, B) in enumerate(self.linear_models)] # type: ignore
+
+    def to_dict(self) -> dict:
+        #TODO
+        pass
 
     def closest_operating_points(self, beta: np.ndarray) -> Tuple[int, int]:
         """
@@ -311,16 +365,16 @@ class GainScheduling(Controller):
         return i, j
 
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: Optional[float] = None) -> np.ndarray:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray) -> np.ndarray:
         """
         Calculates the control input using gain scheduling.
 
         Parameters
         ----------
-        x : np.ndarray
-            Current state vector.
-        dt : float, optional
-            Time step (unused).
+        att_state : np.ndarray
+            Attitude state vector.
+        orbit_state : np.ndarray
+            Orbit state vector.
 
         Returns
         -------
@@ -347,18 +401,18 @@ class GainScheduling(Controller):
     
 class FeedforwardController(Controller):
 
-    def __init__(self, K_q: np.ndarray, K_omega: np.ndarray, J_hat: np.ndarray, B: np.ndarray, u_min: np.ndarray, u_max: np.ndarray):
+    def __init__(self, K_q: np.ndarray, K_omega: np.ndarray, J_hat: np.ndarray):
         super().__init__()
-        self.K_q = K_q
-        self.K_omega = K_omega
-        self.J_hat = J_hat
-        self.B = B
-        self.u_min = u_min
-        self.u_max = u_max
+        self.K_q = np.asarray(K_q)
+        self.K_omega = np.asarray(K_omega)
+        self.J_hat = np.asarray(J_hat)
+
+        _, _, _, J_u = build_error_dynamics(omega_c, J_hat, A_hat, K_t, K_mag)
+        self.J_u: ca.Function = J_u
 
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: float | None = None) -> np.ndarray:
-        x = self.calc_input_cmds(att_state, orbit_state)
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, B_field: np.ndarray) -> np.ndarray:
+        x = self.calc_nadir_state_error(att_state, orbit_state)
         q_err = x[:3]
         omega_err = x[3:]
         h_w = x[6:]
@@ -367,20 +421,29 @@ class FeedforwardController(Controller):
 
         tau_cmd = np.cross(omega, self.J_hat @ omega + h_w) - (self.K_q @ q_err + self.K_omega @ omega_err)
 
-        u = cgi_allocation(self.B, tau_cmd, self.u_min, self.u_max)
+        u = cgi_allocation(self.J_u(B_field), tau_cmd, self.u_min, self.u_max)
 
         return u
     
 
 class MPC(Controller):
-    def __init__(self, F: ca.Function, n_steps) -> None:
+    def __init__(self, dt, n_steps) -> None:
         super().__init__()
-
-        self.F = F
         self.n_steps = n_steps
+        self.dt = dt
+
+        F, _, _, _ = build_error_dynamics(omega_c, J_hat, A_hat, K_t, K_mag) # F(x, u, B, dt)
+        self.F = F
 
         self.X_last = None
         self.U_last = None
+
+    def to_dict(self) -> dict:
+        data = {
+            "dt": self.dt,
+            "n_steps": self.n_steps
+        }
+        return data
 
     def cost_function(self, X, U):
         #TODO: implement cost function
@@ -396,7 +459,22 @@ class MPC(Controller):
 
         return cost
 
-    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray, dt: float | None = None) -> np.ndarray[Tuple[Any], np.dtype[np.float64]]:
+    def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray) -> np.ndarray:
+        """
+        Calculates the control input using MPC.
+
+        Parameters
+        ----------
+        att_state : np.ndarray
+            Attitude state vector.
+        orbit_state : np.ndarray
+            Orbit state vector.
+
+        Returns
+        -------
+        np.ndarray
+            Control input vector.
+        """
         # TODO: See if optimal control problem can be turned into a ca.Function and compiled for computational speed
 
         x0 = self.calc_nadir_state_error(att_state, orbit_state)
@@ -414,7 +492,8 @@ class MPC(Controller):
         # constraints
         opti.subject_to(X[:, 0] == x0)
         for k in range(self.n_steps):
-            opti.subject_to(X[:, k+1] == self.F(X[:, k], U[:, k])) 
+            B_field = ...
+            opti.subject_to(X[:, k+1] == self.F(X[:, k], U[:, k], B_field, self.dt)) 
 
         # TODO: implement input constraints
         opti.subject_to(opti.bounded(...))

@@ -7,6 +7,7 @@ import numpy as np
 
 from actuators import to_current_commands
 import controllers
+from controllers import Controller
 from dynamics import SGP4
 import environment as env
 import disturbances as dis
@@ -142,6 +143,12 @@ class Simulation:
             "DisturbanceTorques": self.enable_disturbance_torques,
             "DisturbanceForces": self.enable_disturbance_forces
         }
+
+        data["Controller"] = {
+            "name": self.controller.__class__.__name__, 
+            "params": self.controller.to_dict()
+            }
+        
 
         r_eci = self.inital_state[0:3]
         v_eci = self.inital_state[3:6]

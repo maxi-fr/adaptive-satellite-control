@@ -27,7 +27,12 @@ def integrator(f: ca.Function, x: ca.SX, u: ca.SX, dt: ca.SX) -> ca.SX:
     k2 = f(x + 0.5 * dt * k1, u)
     k3 = f(x + 0.5 * dt * k2, u)
     k4 = f(x + dt * k3, u)
-    return x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4) #type: ignore
+    x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4) #type: ignore
+
+    x_next[:4] /= ca.norm_2(x_next[:4])
+
+    return x_next
+
 
 def quaternion_product() -> ca.Function:
     """
@@ -100,7 +105,7 @@ def build_kinematics() -> ca.Function:
     return ca.Function("f_kin", [q, w], [q_dot], ["q", "w"], ["q_dot"])
 
 
-def build_rotational_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np.ndarray, K_mag: np.ndarray) -> ca.Function:
+def build_rotational_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray) -> ca.Function:
     """
     Builds the symbolic rotational dynamics function (Euler's equation).
 
@@ -130,7 +135,7 @@ def build_rotational_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np
 
 
     # TODO: maybe implement build_rw and build_mag functions to deal with saturation and so on
-    tau_rw = A_hat @ (K_t_dash * u_rw) 
+    tau_rw = A_hat @ (K_rw * u_rw) 
     tau_mag = ca.cross(K_mag * u_mag, B_B) 
 
     cross_term = ca.cross(omega, J_hat @ omega + h_w)
@@ -146,7 +151,7 @@ def build_rotational_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np
     )
 
 
-def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np.ndarray, K_mag: np.ndarray) -> ca.Function:
+def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray) -> ca.Function:
     """
     Builds the complete symbolic dynamics model for the satellite attitude.
 
@@ -164,7 +169,7 @@ def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np.nda
         A CasADi function `f(x, u, B_B) -> dx`.
     """
     f_kin: ca.Function = build_kinematics()
-    f_rot: ca.Function = build_rotational_dynamics(J_hat, A_hat, K_t_dash, K_mag)
+    f_rot: ca.Function = build_rotational_dynamics(J_hat, A_hat, K_rw, K_mag)
 
     q_BI = ca.SX.sym('q_BI', 4) #type: ignore 
     omega = ca.SX.sym('omega', 3) #type: ignore
@@ -179,14 +184,14 @@ def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np.nda
 
     d_q_BI = f_kin(q_BI, omega)
     d_omega = f_rot(omega, u_rw, u_mag, h_w, B_B)
-    d_h_w = A_hat @ (K_t_dash * u_rw)
+    d_h_w = A_hat @ (K_rw * u_rw)
 
     dx = ca.vertcat(d_q_BI, d_omega, d_h_w)
 
     return ca.Function("system_dynamics", [x, u, B_B], [dx], ["x", "u", "B_B"], ["dx"])
 
 
-def build_error_dynamics(omega_c: np.ndarray, J_hat: np.ndarray, A_hat: np.ndarray, K_t_dash: np.ndarray, K_mag: np.ndarray) -> tuple[ca.Function, ca.Function, ca.Function]:
+def build_error_dynamics(omega_c: np.ndarray, J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray) -> tuple[ca.Function, ca.Function, ca.Function, ca.Function]:
     """
     Builds the complete symbolic dynamics model for the attitude error.
 
@@ -200,11 +205,15 @@ def build_error_dynamics(omega_c: np.ndarray, J_hat: np.ndarray, A_hat: np.ndarr
 
     Returns
     -------
-    ca.Function
-        A CasADi function `f(x, u, B_B) -> dx`.
+    tuple[ca.Function, ca.Function, ca.Function, ca.Function]
+        4 CasADi functions:
+          F(x_k, u_k, B) -> x_{k+1}
+          f_tot(x, u, B) -> dx
+          f_jac_x(x, u) -> J_x(dx)
+          f_jac_u(B) -> J_u(dx)
     """
     f_kin: ca.Function = build_kinematics()
-    f_rot: ca.Function = build_rotational_dynamics(J_hat, A_hat, K_t_dash, K_mag)
+    f_rot: ca.Function = build_rotational_dynamics(J_hat, A_hat, K_rw, K_mag)
 
     B_B = ca.SX.sym('B_B', 3) #type: ignore
 
@@ -227,72 +236,16 @@ def build_error_dynamics(omega_c: np.ndarray, J_hat: np.ndarray, A_hat: np.ndarr
     d_omega_err = d_omega + ca.cross(omega_err, quat_rot(q_err) @ omega_c)
 
     # TODO: maybe implement build_rw and build_mag functions to deal with saturation and so on
-    d_h_w = A_hat @ (K_t_dash * u_rw)
+    d_h_w = A_hat @ (K_rw * u_rw)
 
     dx  = ca.vertcat(d_q_err, d_omega_err, d_h_w)
 
-    f_tot = ca.Function("error_dynamics", [x, u, B_B], [dx], ["x", "u", "B_B"], ["dx"])
-    f_jac_x = ca.Function("f_jac_x", [x, u, B_B], [ca.jacobian(dx, x)], ["x", "u", "B_B"], ["jac_x"])
-    f_jac_u = ca.Function("f_jac_u", [x, u, B_B], [ca.jacobian(dx, u)], ["x", "u", "B_B"], ["jac_u"])
+    f_tot = ca.Function("error_dynamics", [x, u, B_B], [dx], ["x", "u", "B_B"], ["dx"]) # TODO: input should maybe be B field in eci frame 
+    f_jac_x = ca.Function("f_jac_x", [x, u], [ca.jacobian(dx, x)], ["B_B"], ["jac_x"])
+    f_jac_u = ca.Function("f_jac_u", [B_B], [ca.jacobian(dx, u)], ["B_B"], ["jac_u"])
 
-    return f_tot, f_jac_x, f_jac_u
+    dt = ca.SX.sym("dt") #type: ignore
+    F = ca.Function("discrete_error_dynamics", [x, u, B_B], [integrator(f_tot, x, u, dt)], ["x", "u", "B_B"], ["dx"])
 
+    return F, f_tot, f_jac_x, f_jac_u
 
-
-def jacobian_no_seeds(f):
-    """
-    Wrap CasADi's Jacobian function so that seed inputs are hidden.
-    Returns a callable that only requires the original inputs.
-    """
-    jac_f = f.jacobian()
-
-    n_in = f.n_in()
-    n_out = f.n_out()
-
-    def wrapped(*args):
-        assert len(args) == n_in
-
-        # Evaluate outputs to infer correct seed shapes
-        outs = f(*args)
-
-        # Ensure tuple output
-        if n_out == 1:
-            outs = (outs,)
-
-        # Zero seeds for each output
-        seeds = [ca.DM.zeros(o.size()) for o in outs]
-
-        return jac_f(*args, *seeds)
-
-    return wrapped
-
-def split_jacobian_x_u(f):
-    """
-    Given f(x, u), return two functions:
-      - f_jac_x(x, u): Jacobian wrt x
-      - f_jac_u(x, u): Jacobian wrt u
-    """
-    assert f.n_in() == 2, "f must have exactly two inputs (x, u)"
-
-    jac_f = f.jacobian()
-
-    def _zero_seeds(x_val, u_val):
-        outs = f(x_val, u_val)
-        if f.n_out() == 1:
-            outs = (outs,)
-        return [ca.DM.zeros(o.size()) for o in outs]
-
-    def f_jac_x(x_val, u_val):
-        seeds = _zero_seeds(x_val, u_val)
-        jac_blocks = jac_f(x_val, u_val, *seeds)
-
-        # Blocks are ordered: (out1_x, out1_u, out2_x, out2_u, ...)
-        return tuple(jac_blocks[::2])
-
-    def f_jac_u(x_val, u_val):
-        seeds = _zero_seeds(x_val, u_val)
-        jac_blocks = jac_f(x_val, u_val, *seeds)
-
-        return tuple(jac_blocks[1::2])
-
-    return f_jac_x, f_jac_u
