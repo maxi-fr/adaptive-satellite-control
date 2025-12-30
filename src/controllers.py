@@ -234,7 +234,7 @@ class LQR(PI):
         PI
             Initialized PI controller instance.
         """
-        _, _, f_x, f_u = build_error_dynamics(omega_c, J_hat, A_hat, K_t, K_mag)
+        _, _, f_x, f_u = build_system_dynamics(omega_c, J_hat, A_hat, K_t, K_mag)
 
         A = f_x(*operating_point, B_field) # TODO: deal with B-field and so on
         B = f_u(B_field)

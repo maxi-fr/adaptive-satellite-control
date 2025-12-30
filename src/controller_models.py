@@ -3,7 +3,7 @@ import numpy as np
 from typing import Callable, List
 import control as ct
 
-def integrator(f: ca.Function, x: ca.SX, u: ca.SX, dt: ca.SX) -> ca.SX:
+def integrator(f: ca.Function, x: ca.SX, u: ca.SX, p: ca.SX, dt: ca.SX) -> ca.SX:
     """
     Performs a single RK4 integration step for a system without parameters.
 
@@ -23,10 +23,10 @@ def integrator(f: ca.Function, x: ca.SX, u: ca.SX, dt: ca.SX) -> ca.SX:
     ca.SX
         The state vector at the next time step.
     """
-    k1 = f(x, u)
-    k2 = f(x + 0.5 * dt * k1, u)
-    k3 = f(x + 0.5 * dt * k2, u)
-    k4 = f(x + dt * k3, u)
+    k1 = f(x, u, p)
+    k2 = f(x + 0.5 * dt * k1, u, p)
+    k3 = f(x + 0.5 * dt * k2, u, p)
+    k4 = f(x + dt * k3, u, p)
     x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4) #type: ignore
 
     x_next[:4] /= ca.norm_2(x_next[:4])
@@ -79,6 +79,37 @@ def quaternion_rotation() -> ca.Function:
     return ca.Function("quaternion_rotation", [q, x], [x_ret])
 quat_rot: ca.Function = quaternion_rotation()
 
+
+def build_attitude_jacobian() -> ca.Function:
+    """
+    Builds the Xi matrix function.
+
+    Xi(q) = [ q_4 * I_3 + [q_{1:3} x] ]
+            [ -q_{1:3}^T              ]
+
+    Returns
+    -------
+    ca.Function
+        A CasADi function `f(q) -> Xi`.
+    """
+    q = ca.SX.sym('q', 4) #type: ignore
+
+    q_vec = q[:3]
+    q_w = q[3]
+
+    top = ca.vertcat(
+        ca.horzcat(q_w, -q_vec[2], q_vec[1]),
+        ca.horzcat(q_vec[2], q_w, -q_vec[0]),
+        ca.horzcat(-q_vec[1], q_vec[0], q_w)
+    )
+
+    bottom = -q_vec.T
+
+    Xi = ca.vertcat(top, bottom)
+
+    return ca.Function("Xi", [q], [Xi], ["q"], ["Xi"])
+
+
 def build_kinematics() -> ca.Function:
     """
     Builds the symbolic quaternion kinematics function.
@@ -102,7 +133,7 @@ def build_kinematics() -> ca.Function:
 
     q_dot = ca.vertcat(qv_dot, qw_dot)
 
-    return ca.Function("f_kin", [q, w], [q_dot], ["q", "w"], ["q_dot"])
+    return ca.Function("f_kin", [q, w], [q_dot], ["q", "w"], ["q_dot"])    
 
 
 def build_rotational_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray) -> ca.Function:
@@ -146,12 +177,12 @@ def build_rotational_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.nda
         "f_rot",
         [omega, u_rw, u_mag, h_w, B_B],
         [omega_dot],
-        ["q_BI", "omega", "u_rw", "u_mag", "h_w", "B_B"],
+        ["omega", "u_rw", "u_mag", "h_w", "B_B"],
         ["omega_dot"]
     )
 
 
-def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray) -> ca.Function:
+def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray):
     """
     Builds the complete symbolic dynamics model for the satellite attitude.
 
@@ -180,72 +211,55 @@ def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray
     u_mag = ca.SX.sym('u_mag', 3) #type: ignore
     u = ca.vertcat(u_rw, u_mag)
 
-    B_B = ca.SX.sym('B_B', 3) #type: ignore
+    B_field = ca.SX.sym('B_field', 3) #type: ignore
 
     d_q_BI = f_kin(q_BI, omega)
-    d_omega = f_rot(omega, u_rw, u_mag, h_w, B_B)
+    d_omega = f_rot(omega, u_rw, u_mag, h_w, quat_rot(q_BI, B_field))
     d_h_w = A_hat @ (K_rw * u_rw)
 
     dx = ca.vertcat(d_q_BI, d_omega, d_h_w)
 
-    return ca.Function("system_dynamics", [x, u, B_B], [dx], ["x", "u", "B_B"], ["dx"])
+    return dx, x, u, B_field
 
 
-def build_error_dynamics(omega_c: np.ndarray, J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray) -> tuple[ca.Function, ca.Function, ca.Function, ca.Function]:
-    """
-    Builds the complete symbolic dynamics model for the attitude error.
+def build_reduced_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray):
 
-    This combines kinematics, rotational dynamics, and wheel dynamics into a single
-    state-space function dx/dt = f(x, u, *params).
-
-    Parameters
-    ----------
-    J_hat, J_w, A_hat, K_e_rw, K_t_dash, K_mag : np.ndarray
-        Physical parameters of the satellite and actuators.
-
-    Returns
-    -------
-    tuple[ca.Function, ca.Function, ca.Function, ca.Function]
-        4 CasADi functions:
-          F(x_k, u_k, B) -> x_{k+1}
-          f_tot(x, u, B) -> dx
-          f_jac_x(x, u) -> J_x(dx)
-          f_jac_u(B) -> J_u(dx)
-    """
-    f_kin: ca.Function = build_kinematics()
-    f_rot: ca.Function = build_rotational_dynamics(J_hat, A_hat, K_rw, K_mag)
-
-    B_B = ca.SX.sym('B_B', 3) #type: ignore
-
-    q_err = ca.SX.sym("q_err", 3) #type: ignore
-    omega_err = ca.SX.sym("omega_err", 3) #type: ignore
-    h_w = ca.SX.sym("h_w", 3) #type: ignore
-    x = ca.vertcat(q_err, omega_err, h_w)
-
-    u_rw = ca.SX.sym('u_rw', 3) #type: ignore
-    u_mag = ca.SX.sym('u_mag', 3) #type: ignore
-    u = ca.vertcat(u_rw, u_mag)
-    
-    omega = omega_err + quat_rot(q_err) @ omega_c
-    
-    q_err[3] = 1 - ca.dot(q_err[:3], q_err[:3])
-
-    d_omega = f_rot(omega, u_rw, u_mag, h_w, B_B)
-
-    d_q_err = f_kin(q_err, omega_err)
-    d_omega_err = d_omega + ca.cross(omega_err, quat_rot(q_err) @ omega_c)
-
-    # TODO: maybe implement build_rw and build_mag functions to deal with saturation and so on
-    d_h_w = A_hat @ (K_rw * u_rw)
-
-    dx  = ca.vertcat(d_q_err, d_omega_err, d_h_w)
-
-    f_tot = ca.Function("error_dynamics", [x, u, B_B], [dx], ["x", "u", "B_B"], ["dx"]) # TODO: input should maybe be B field in eci frame 
-    f_jac_x = ca.Function("f_jac_x", [x, u], [ca.jacobian(dx, x)], ["B_B"], ["jac_x"])
-    f_jac_u = ca.Function("f_jac_u", [B_B], [ca.jacobian(dx, u)], ["B_B"], ["jac_u"])
+    dx, x, u, B_field = build_system_dynamics(J_hat, A_hat, K_rw, K_mag)
 
     dt = ca.SX.sym("dt") #type: ignore
-    F = ca.Function("discrete_error_dynamics", [x, u, B_B], [integrator(f_tot, x, u, dt)], ["x", "u", "B_B"], ["dx"])
+    f = ca.Function("system_dynamics", [x, u, B_field], [dx], ["x", "u", "B_fiel"], ["dx"])
+    x_next = integrator(f, x, u, B_field, dt)
 
-    return F, f_tot, f_jac_x, f_jac_u
+    A = ca.jacobian(x_next, x)
 
+    B = ca.jacobian(x_next, u)
+
+    Xi = build_attitude_jacobian()
+    xi = Xi(x[:4])
+
+    XI = ca.SX.zeros(10, 9)
+    XI[:4, :3] = xi
+    XI[4:, 3:] += ca.SX.eye(6)
+
+    A_tilde = XI.T @ A @ XI
+
+    B_tilde = XI.T @ B
+
+    f_lin = ca.Function("get_discrete_linearized_dynamics", [x, u, B_field, dt], [A_tilde, B_tilde], ["x_star", "u_star", "B_field_star", "dt"], ["A_tilde", "B_tilde"])
+    F = ca.Function("discrete_dynamics", [x, u, B_field, dt], [x_next], ["x", "u", "B_field", "dt"], ["x_next"])
+
+
+    return F, f_lin
+
+
+if __name__ == "__main__":
+    J_hat = np.eye(3)
+    A_hat = np.eye(3)
+    K_rw = np.ones(3)
+    K_mag = np.ones(3)
+
+    F, f_lin = build_reduced_system_dynamics(J_hat, A_hat, K_rw, K_mag)
+    print(F)
+
+    print(f_lin)
+    
