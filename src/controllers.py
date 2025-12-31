@@ -1,13 +1,17 @@
 from abc import ABC, abstractmethod
+import datetime
 import casadi as ca
 import numpy as np
 from typing import Callable, List, Tuple, Optional, Union, Any
 import control as ct
 from scipy.spatial.transform import Rotation as R
 
-from controller_models import build_error_dynamics
-from kinematics import orc_to_sbc
+from controller_models import build_reduced_error_dynamics, build_reduced_system_dynamics, build_system_dynamics
+from dynamics import SGP4
+from environment import magnetic_field_vector
+from kinematics import eci_to_geodedic, orc_to_eci, orc_to_sbc
 from utils import cgi_allocation
+from sgp4 import exporter
 
 
 class Controller(ABC):
@@ -209,8 +213,8 @@ class PI(Controller):
         return u + self.u_star # TODO: anti wind up needs to consider u_star as well?!
     
 class LQR(PI):
-    def __init__(self, operating_point: Tuple[np.ndarray, np.ndarray], Q: np.ndarray, R: np.ndarray, 
-                 m: float|None = None, dt: float|None = None, K_q_int: np.ndarray|None = None):
+    def __init__(self, Q: np.ndarray, R: np.ndarray, tle1, tle2, t0, J_hat, dt: float, 
+                 m: float|None = None, K_q_int: np.ndarray|None = None):
         """
         Creates a PI controller using LQR gains.
 
@@ -234,10 +238,40 @@ class LQR(PI):
         PI
             Initialized PI controller instance.
         """
-        _, _, f_x, f_u = build_system_dynamics(omega_c, J_hat, A_hat, K_t, K_mag)
+        x_star = np.zeros(9)
+        x_star[3] = 1
 
-        A = f_x(*operating_point, B_field) # TODO: deal with B-field and so on
-        B = f_u(B_field)
+        orbit_model = SGP4.from_tle(tle1, tle2)
+
+        mean_motion = orbit_model.satrec.no_kozai / 60
+
+        # Generate a time array for one orbit to average the B-field and operating point
+        period = 2 * np.pi / mean_motion
+        num_points = 100 # Number of points to sample over one orbit
+        T = [t0 + datetime.timedelta(seconds=i * period / num_points) for i in range(num_points)]
+
+        r_ECI, v_ECI = orbit_model.propagate(T)
+
+        omega_c = np.array([0, -np.linalg.norm(v_ECI)/ np.linalg.norm(r_ECI), 0]) # In ORC frame
+        
+        omega_c = v_ECI.mean(axis=0) / np.linalg.norm(r_ECI.mean(axis=0))
+
+        u_star = np.concatenate((np.zeros(3), np.cross(omega_c, J_hat @ omega_c)))
+
+        _, A_func, B_func= build_reduced_error_dynamics(dt, omega_c, J_hat)
+
+        A = A_func(x_star, u_star, np.zeros(3)) 
+
+        Bs = []
+        for i, t in enumerate(T):
+            r, v = r_ECI[i], v_ECI[i]
+
+            B_eci = magnetic_field_vector(t, *eci_to_geodedic(r))
+            B_orc = orc_to_eci(r, v).apply(B_eci)
+        
+            Bs.append(B_func(x_star, u_star, B_orc))
+
+        B = np.stack(Bs, axis=0).mean(axis=0)
 
         self.Q = np.asarray(Q)
         self.R = np.asarray(R)
@@ -248,13 +282,13 @@ class LQR(PI):
             K_q_int = np.zeros((K.shape[0], 3))
             dt = 0
 
-        super().__init__(K[:, :3], K[:, 3:6], K[:, 6:9], K_q_int, operating_point, dt, m)
+        super().__init__(K[:, :3], K[:, 3:6], K[:, 6:9], K_q_int, (x_star, u_star), dt, m)
 
     def to_dict(self) -> dict:
         data ={
             "operating_point": [self.x_star.tolist(), self.u_star.tolist()],
-            "Q": self.Q,
-            "R": self.R,
+            "Q": self.Q.tolist(),
+            "R": self.R.tolist(),
             "m": self.m,
             "K_q_int": self.K_q_int.tolist(),
             "dt": self.dt

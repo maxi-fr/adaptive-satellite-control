@@ -1,21 +1,26 @@
 import casadi as ca
 import numpy as np
-from typing import Callable, List
+from typing import Callable, List, Tuple
 import control as ct
 
-def integrator(f: ca.Function, x: ca.SX, u: ca.SX, p: ca.SX, dt: ca.SX) -> ca.SX:
+def integrator(f: Callable[[ca.SX, ca.SX, ca.SX], ca.SX], x: ca.SX, u: ca.SX, p: ca.SX, dt: ca.SX|float) -> ca.SX:
     """
-    Performs a single RK4 integration step for a system without parameters.
+    Performs a single RK4 integration step using a Python callable for dynamics.
+
+    This function also normalizes the quaternion part of the state vector (first 4 elements)
+    after the integration step to ensure unit norm.
 
     Parameters
     ----------
-    f : ca.Function
-        The system dynamics function with the signature f(x, u).
+    f : Callable[[ca.SX, ca.SX, ca.SX], ca.SX]
+        The system dynamics function with the signature f(x, u, p) -> dx.
     x : ca.SX
         The current state vector.
     u : ca.SX
         The current control input vector.
-    dt : ca.SX
+    p : ca.SX
+        Time-varying parameters (e.g., magnetic field).
+    dt : ca.SX | float
         The integration time step.
 
     Returns
@@ -29,160 +34,206 @@ def integrator(f: ca.Function, x: ca.SX, u: ca.SX, p: ca.SX, dt: ca.SX) -> ca.SX
     k4 = f(x + dt * k3, u, p)
     x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4) #type: ignore
 
-    x_next[:4] /= ca.norm_2(x_next[:4])
+    x_next[:4] = x_next[:4]/ca.norm_2(x_next[:4])
 
     return x_next
 
 
-def quaternion_product() -> ca.Function:
+def quaternion_product(qa: ca.SX, qb: ca.SX) -> ca.SX:
     """
-    Builds a CasADi function for quaternion multiplication.
+    Symbolic quaternion multiplication.
 
-    The function implements the product of two quaternions, qa and qb,
-    assuming scalar-last format [qx, qy, qz, qw].
+    Computes the product of two quaternions qa and qb.
+    Assumes scalar-last format: q = [qx, qy, qz, qw].
+
+    Parameters
+    ----------
+    qa : ca.SX
+        First quaternion (4x1).
+    qb : ca.SX
+        Second quaternion (4x1).
 
     Returns
     -------
-    ca.Function
-        A CasADi function with signature `f(qa, qb) -> q_ret`.
+    ca.SX
+        The product quaternion (4x1).
     """
-    qa = ca.SX.sym('qa', 4) #type: ignore
-    qb = ca.SX.sym('qb', 4) #type: ignore
-    q_ret = ca.SX.sym('q_ret', 4) #type: ignore
+    q_ret_vec = qb[3]*qa[:3] + qa[3]*qb[:3] + ca.cross(qa[:3], qb[:3])
+    q_ret_w = qa[3]*qb[3] - ca.dot(qa[:3], qb[:3])
 
-    q_ret[:3] = qb[3]*qa[:3] + qa[3]*qb[:3] + ca.cross(qa[:3], qb[:3])
-    q_ret[3] = qa[3]*qb[3] - ca.dot(qa[:3], qb[:3])
+    return ca.vertcat(q_ret_vec, q_ret_w)
 
-    return ca.Function("quaternion_product", [qa, qb], [q_ret])
-quat_prod: ca.Function = quaternion_product()
 
-def quaternion_rotation() -> ca.Function:
+def quaternion_rotation(q: ca.SX, x: ca.SX) -> ca.SX:
     """
-    Builds a CasADi function for rotating a 3D vector by a quaternion.
+    Rotates a 3D vector x by a quaternion q.
+    
+    Implements the operation v' = q * v * q_conj.
+
+    Parameters
+    ----------
+    q : ca.SX
+        Rotation quaternion (4x1), scalar-last.
+    x : ca.SX
+        3D vector to rotate (3x1).
 
     Returns
     -------
-    ca.Function
-        A CasADi function with signature `f(q, x) -> x_ret`.
+    ca.SX
+        Rotated 3D vector (3x1).
     """
-    q = ca.SX.sym('q', 4) #type: ignore
-    q_conj = ca.SX.sym('q_conj', 4) #type: ignore
-    x_vec_4 = ca.SX.sym('vec', 4) #type: ignore
-    x = x_vec_4[:3]
-    x_vec_4[3] = 0
+    q_conj = ca.vertcat(q[:3], -q[3])
+    x_vec_4 = ca.vertcat(x, 0)
 
-    q_conj[:3] = q[:3]
-    q_conj[3] = -q[3]
+    # q * x * q_conj
+    temp = quaternion_product(q, x_vec_4)
+    x_ret = quaternion_product(temp, q_conj)[:3]
 
-    x_ret = quat_prod(quat_prod(q, x_vec_4), q_conj)[:3] #type: ignore
-
-    return ca.Function("quaternion_rotation", [q, x], [x_ret])
-quat_rot: ca.Function = quaternion_rotation()
+    return x_ret
 
 
-def build_attitude_jacobian() -> ca.Function:
+def attitude_jacobian(q: ca.SX) -> ca.SX:
     """
-    Builds the Xi matrix function.
+    Builds the Xi matrix symbolically.
 
-    Xi(q) = [ q_4 * I_3 + [q_{1:3} x] ]
-            [ -q_{1:3}^T              ]
+    The Xi matrix maps angular velocity to quaternion derivative:
+    dq/dt = 0.5 * Xi(q) * omega.
+    Also 
+
+    Xi(q) = | q_4 * I_3 + [q_{1:3} x] |
+            | -q_{1:3}^T              |
+
+    Parameters
+    ----------
+    q : ca.SX
+        Quaternion (4x1), scalar-last.
 
     Returns
     -------
-    ca.Function
-        A CasADi function `f(q) -> Xi`.
+    ca.SX
+        The Xi matrix (4x3).
     """
-    q = ca.SX.sym('q', 4) #type: ignore
-
     q_vec = q[:3]
     q_w = q[3]
 
-    top = ca.vertcat(
+    Xi = ca.vertcat(
         ca.horzcat(q_w, -q_vec[2], q_vec[1]),
         ca.horzcat(q_vec[2], q_w, -q_vec[0]),
-        ca.horzcat(-q_vec[1], q_vec[0], q_w)
+        ca.horzcat(-q_vec[1], q_vec[0], q_w),
+        -q_vec.T
     )
 
-    bottom = -q_vec.T
-
-    Xi = ca.vertcat(top, bottom)
-
-    return ca.Function("Xi", [q], [Xi], ["q"], ["Xi"])
+    return Xi
 
 
-def build_kinematics() -> ca.Function:
+def kinematics(q: ca.SX, w: ca.SX) -> ca.SX:
     """
-    Builds the symbolic quaternion kinematics function.
+    Symbolic quaternion kinematics.
 
-    The function describes the time derivative of a quaternion based on angular velocity.
-    q_dot = 0.5 * w (x) q
+    Computes the time derivative of a quaternion based on angular velocity.
+    q_dot = 0.5 * q (x) w  (quaternion multiplication)
+
+    Parameters
+    ----------
+    q : ca.SX
+        Current quaternion (4x1).
+    w : ca.SX
+        Angular velocity in body frame (3x1).
 
     Returns
     -------
-    ca.Function
-        A CasADi function `f(q, w) -> q_dot`.
+    ca.SX
+        Quaternion derivative (4x1).
     """
-    q = ca.SX.sym('q', 4) #type: ignore
-    w = ca.SX.sym(r'\omega', 3) #type: ignore
-
     qv = q[:3]
     qw = q[3]
 
     qv_dot = 0.5 * (qw * w + ca.cross(w, qv))
     qw_dot = -0.5 * ca.dot(w, qv)
 
-    q_dot = ca.vertcat(qv_dot, qw_dot)
+    # TODO: could also just be 0.5 * (attitude_jacobian(q) @ w)
 
-    return ca.Function("f_kin", [q, w], [q_dot], ["q", "w"], ["q_dot"])    
+    return ca.vertcat(qv_dot, qw_dot)
 
 
-def build_rotational_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray) -> ca.Function:
+def rotational_dynamics(omega: ca.SX, u_rw: ca.SX, u_mag: ca.SX, h_w: ca.SX, B_B: ca.SX, J_hat: np.ndarray) -> ca.SX:
     """
-    Builds the symbolic rotational dynamics function (Euler's equation).
+    Symbolic rotational dynamics (Euler's equation).
+
+    Computes angular acceleration considering control torques and gyroscopic terms.
 
     Parameters
     ----------
+    omega : ca.SX
+        Angular velocity (3x1).
+    u_rw : ca.SX
+        Reaction wheel control torque (3x1).
+    u_mag : ca.SX
+        Commanded magnetic torque vector (3x1).
+    h_w : ca.SX
+        Reaction wheel angular momentum (3x1).
+    B_B : ca.SX
+        Magnetic field vector in body frame (3x1).
     J_hat : np.ndarray
-        Estimated inertia tensor of the satellite.
-    A_hat : np.ndarray
-        Reaction wheel alignment matrix.
-    K_t_dash : np.ndarray
-        Reaction wheel torque constant.
-    K_mag : np.ndarray
-        Magnetorquer dipole moment constant.
+        Estimated inertia tensor of the satellite (3x3).
 
     Returns
     -------
-    ca.Function
-        A CasADi function `f(q_BI, omega, u_rw, u_mag, omega_w, B_B) -> omega_dot`.
+    ca.SX
+        Angular acceleration (3x1).
     """
-    omega = ca.SX.sym('omega', 3) #type: ignore
-    h_w = ca.SX.sym("h_w", 3) #type: ignore
-
-    u_rw = ca.SX.sym('u_rw', 3) #type: ignore
-    u_mag = ca.SX.sym('u_mag', 3) #type: ignore
-    
-    B_B = ca.SX.sym('B_B', 3) #type: ignore
-
-
     # TODO: maybe implement build_rw and build_mag functions to deal with saturation and so on
-    tau_rw = A_hat @ (K_rw * u_rw) 
-    tau_mag = ca.cross(K_mag * u_mag, B_B) 
+    tau_rw = -u_rw 
+
+    b = B_B/ca.norm_2(B_B)
+
+    tau_mag = (ca.SX.eye(3) - b @ b.T) @ u_mag 
 
     cross_term = ca.cross(omega, J_hat @ omega + h_w)
     total_torque = tau_mag - tau_rw - cross_term
-    omega_dot = ca.solve(J_hat, total_torque)
-
-    return ca.Function(
-        "f_rot",
-        [omega, u_rw, u_mag, h_w, B_B],
-        [omega_dot],
-        ["omega", "u_rw", "u_mag", "h_w", "B_B"],
-        ["omega_dot"]
-    )
+    
+    return ca.solve(J_hat, total_torque)
 
 
-def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray):
+def satellite_dynamics(x: ca.SX, u: ca.SX, B_eci: ca.SX, J_hat: np.ndarray) -> ca.SX:
+    """
+    Computes the state derivative dx/dt for the satellite system.
+
+    State vector x: [q_BI (4), omega (3), h_w (3)] (size 10).
+    Input vector u: [u_rw (3), u_mag (3)] (size 6).
+
+    Parameters
+    ----------
+    x : ca.SX
+        State vector.
+    u : ca.SX
+        Control input vector.
+    B_eci : ca.SX
+        Magnetic field vector in inertial frame (3x1).
+    J_hat : np.ndarray
+        Inertia matrix.
+
+    Returns
+    -------
+    ca.SX
+        State derivative dx/dt (10x1).
+    """
+    q_BI = x[:4]
+    omega = x[4:7]
+    h_w = x[7:10]
+
+    u_rw = u[:3]
+    u_mag = u[3:]
+
+    d_q_BI = kinematics(q_BI, omega)
+
+    d_omega = rotational_dynamics(omega, u_rw, u_mag, h_w, quaternion_rotation(q_BI, B_eci), J_hat)
+    d_h_w = u_rw
+
+    return ca.vertcat(d_q_BI, d_omega, d_h_w)
+
+
+def build_system_dynamics(J_hat: np.ndarray) -> ca.Function:
     """
     Builds the complete symbolic dynamics model for the satellite attitude.
 
@@ -191,17 +242,14 @@ def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray
 
     Parameters
     ----------
-    J_hat, A_hat, K_e_rw, K_t_dash, K_mag : np.ndarray
-        Physical parameters of the satellite and actuators.
+    J_hat : np.ndarray
+        Inertia tensor of the satellite.
 
     Returns
     -------
     ca.Function
         A CasADi function `f(x, u, B_B) -> dx`.
     """
-    f_kin: ca.Function = build_kinematics()
-    f_rot: ca.Function = build_rotational_dynamics(J_hat, A_hat, K_rw, K_mag)
-
     q_BI = ca.SX.sym('q_BI', 4) #type: ignore 
     omega = ca.SX.sym('omega', 3) #type: ignore
     h_w = ca.SX.sym("h_w", 3) #type: ignore
@@ -211,55 +259,185 @@ def build_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray
     u_mag = ca.SX.sym('u_mag', 3) #type: ignore
     u = ca.vertcat(u_rw, u_mag)
 
-    B_field = ca.SX.sym('B_field', 3) #type: ignore
+    B_eci = ca.SX.sym('B_eci', 3) #type: ignore
 
-    d_q_BI = f_kin(q_BI, omega)
-    d_omega = f_rot(omega, u_rw, u_mag, h_w, quat_rot(q_BI, B_field))
-    d_h_w = A_hat @ (K_rw * u_rw)
+    dx = satellite_dynamics(x, u, B_eci, J_hat)
 
-    dx = ca.vertcat(d_q_BI, d_omega, d_h_w)
-
-    return dx, x, u, B_field
+    return ca.Function("continuous_dynamics", [x, u, B_eci], [dx], ["x", "u", "B_eci"], ["dx"])
 
 
-def build_reduced_system_dynamics(J_hat: np.ndarray, A_hat: np.ndarray, K_rw: np.ndarray, K_mag: np.ndarray):
+def build_reduced_system_dynamics(dt: float, J_hat: np.ndarray) -> Tuple[ca.Function, ca.Function, ca.Function]:
+    """
+    Builds the discrete-time linearized dynamics for the reduced attitude system.
 
-    dx, x, u, B_field = build_system_dynamics(J_hat, A_hat, K_rw, K_mag)
+    This function performs RK4 integration symbolically to obtain discrete dynamics,
+    linearizes the system around a symbolic operating point, and applies a coordinate
+    change using the attitude Jacobian (Xi) to handle the quaternion constraint.
 
-    dt = ca.SX.sym("dt") #type: ignore
-    f = ca.Function("system_dynamics", [x, u, B_field], [dx], ["x", "u", "B_fiel"], ["dx"])
-    x_next = integrator(f, x, u, B_field, dt)
+    Parameters
+    ----------
+    dt : float
+        Sampling time step.
+    J_hat : np.ndarray
+        Inertia tensor.
+
+    Returns
+    -------
+    Tuple[ca.Function, ca.Function, ca.Function]
+        - F: Discrete dynamics function `x_next = F(x, u, B_eci)`.
+        - A_func: Linearized state matrix function `A_tilde = A_func(x, u, B_eci)`.
+        - B_func: Linearized input matrix function `B_tilde = B_func(x, u, B_eci)`.
+    """
+
+    q_BI = ca.SX.sym('q', 4) #type: ignore 
+    omega = ca.SX.sym('omega', 3) #type: ignore
+    h_w = ca.SX.sym("h_w", 3) #type: ignore
+    x = ca.vertcat(q_BI, omega, h_w)
+
+    u_rw = ca.SX.sym('u_rw', 3) #type: ignore
+    u_mag = ca.SX.sym('u_mag', 3) #type: ignore
+    u = ca.vertcat(u_rw, u_mag)
+
+    B_eci = ca.SX.sym('B_eci', 3) #type: ignore
+    
+    # Define a lambda for the dynamics to pass to the integrator
+    dyn_fn = lambda x_s, u_s, p_s: satellite_dynamics(x_s, u_s, p_s, J_hat)
+    
+    x_next = integrator(dyn_fn, x, u, B_eci, dt)
+
+    A = ca.jacobian(x_next, x)
+
+    # print("Check the rank of A: should be 9")
+    # ax = np.random.randn(10)
+    # ax[:4] = ax[:4]/np.linalg.norm(ax[:4])
+    # Ax = ca.Function("A", [x, u, B_eci], [A], ["x", "u", "B_eci"], ["A"])
+    # print("A: ", np.array(Ax(ax, np.zeros(6), np.zeros(3))).shape)
+    # print("rank(A) = ", np.linalg.matrix_rank(Ax(ax, np.zeros(6), np.zeros(3))))
+
+    B = ca.jacobian(x_next, u)
+
+    xi = attitude_jacobian(x[:4])
+
+    E = ca.SX.zeros(10, 9)
+    E[:4, :3] = xi
+    E[4:, 3:] = ca.SX.eye(6)
+
+    A_tilde = E.T @ A @ E
+
+    B_tilde = E.T @ B
+
+    A_func = ca.Function("get_discrete_linearized_dynamics", [x, u, B_eci], [A_tilde], ["x_star", "u_star", "B_eci_star"], ["A_tilde"])
+    B_func = ca.Function("get_discrete_linearized_dynamics", [x, u, B_eci], [B_tilde], ["x_star", "u_star", "B_eci_star"], ["B_tilde"])
+    F = ca.Function("discrete_dynamics", [x, u, B_eci], [x_next], ["x", "u", "B_eci"], ["x_next"])
+
+    return F, A_func, B_func
+
+
+
+def error_dynamics(x: ca.SX, u: ca.SX, B_orc: ca.SX, omega_c: np.ndarray, J_hat: np.ndarray) -> ca.SX:
+    """
+    Computes the state derivative dx/dt for the attitude error dynamics.
+
+    State vector x: [q_err (4), omega_err (3), h_w (3)] (size 10).
+    Input vector u: [u_rw (3), u_mag (3)] (size 6).
+
+    Parameters
+    ----------
+    x : ca.SX
+        State vector (error state).
+    u : ca.SX
+        Control input vector.
+    B_orc : ca.SX
+        Magnetic field vector in the Orbit Reference Frame (ORC) (3x1).
+    omega_c : np.ndarray
+        Orbital angular velocity vector (3x1).
+    J_hat : np.ndarray
+        Estimated inertia tensor of the satellite (3x3).
+
+    Returns
+    -------
+    ca.SX
+        State derivative dx/dt (10x1).
+    """
+
+    q_err = x[:4]
+    omega_err = x[4:7]
+    h_w = x[7:10]
+
+    u_rw = u[:3]
+    u_mag = u[3:]
+    
+    omega_c_b = quaternion_rotation(q_err, omega_c)
+    omega = omega_err + omega_c_b
+    
+    q_err[3] = 1 - ca.dot(q_err[:3], q_err[:3])
+
+    d_omega = rotational_dynamics(omega, u_rw, u_mag, h_w, quaternion_rotation(q_err, B_orc), J_hat)
+
+    d_q_err = kinematics(q_err, omega_err)
+    d_omega_err = d_omega + ca.cross(omega_err, omega_c_b)
+    d_h_w = -u_rw
+
+    return ca.vertcat(d_q_err, d_omega_err, d_h_w)
+
+
+def build_reduced_error_dynamics(dt: float, omega_c: np.ndarray, J_hat: np.ndarray) -> Tuple[ca.Function, ca.Function, ca.Function]:
+    """
+    Builds the discrete-time linearized dynamics for the reduced attitude error system.
+
+    This function performs RK4 integration symbolically to obtain discrete dynamics,
+    linearizes the system around a symbolic operating point, and applies a coordinate
+    change using the attitude Jacobian (Xi) to handle the quaternion constraint.
+
+    Parameters
+    ----------
+    dt : float
+        Sampling time step.
+    omega_c : np.ndarray
+        Orbital angular velocity vector (3x1).
+    J_hat : np.ndarray
+        Inertia tensor.
+
+    Returns
+    -------
+    Tuple[ca.Function, ca.Function, ca.Function]
+        - F: Discrete dynamics function `x_next = F(x, u, B_orc)`.
+        - A_func: Linearized state matrix function `A_tilde = A_func(x, u, B_orc)`.
+        - B_func: Linearized input matrix function `B_tilde = B_func(x, u, B_orc)`.
+    """
+
+    q_BI = ca.SX.sym('q', 4) #type: ignore 
+    omega = ca.SX.sym('omega', 3) #type: ignore
+    h_w = ca.SX.sym("h_w", 3) #type: ignore
+    x = ca.vertcat(q_BI, omega, h_w)
+
+    u_rw = ca.SX.sym('u_rw', 3) #type: ignore
+    u_mag = ca.SX.sym('u_mag', 3) #type: ignore
+    u = ca.vertcat(u_rw, u_mag)
+
+    B_orc = ca.SX.sym('B_orc', 3) #type: ignore
+    
+    # Define a lambda for the dynamics to pass to the integrator
+    dyn_fn = lambda x_s, u_s, p_s: error_dynamics(x_s, u_s, p_s, omega_c, J_hat)
+    
+    x_next = integrator(dyn_fn, x, u, B_orc, dt)
 
     A = ca.jacobian(x_next, x)
 
     B = ca.jacobian(x_next, u)
 
-    Xi = build_attitude_jacobian()
-    xi = Xi(x[:4])
+    xi = attitude_jacobian(x[:4])
 
-    XI = ca.SX.zeros(10, 9)
-    XI[:4, :3] = xi
-    XI[4:, 3:] += ca.SX.eye(6)
+    E = ca.SX.zeros(10, 9)
+    E[:4, :3] = xi
+    E[4:, 3:] = ca.SX.eye(6)
 
-    A_tilde = XI.T @ A @ XI
+    A_tilde = E.T @ A @ E
 
-    B_tilde = XI.T @ B
+    B_tilde = E.T @ B
 
-    f_lin = ca.Function("get_discrete_linearized_dynamics", [x, u, B_field, dt], [A_tilde, B_tilde], ["x_star", "u_star", "B_field_star", "dt"], ["A_tilde", "B_tilde"])
-    F = ca.Function("discrete_dynamics", [x, u, B_field, dt], [x_next], ["x", "u", "B_field", "dt"], ["x_next"])
+    A_func = ca.Function("get_discrete_linearized_dynamics", [x, u, B_orc], [A_tilde], ["x_star", "u_star", "B_orc_star"], ["A_tilde"])
+    B_func = ca.Function("get_discrete_linearized_dynamics", [x, u, B_orc], [B_tilde], ["x_star", "u_star", "B_orc_star"], ["B_tilde"])
+    F = ca.Function("discrete_dynamics", [x, u, B_orc], [x_next], ["x", "u", "B_orc"], ["x_next"])
 
-
-    return F, f_lin
-
-
-if __name__ == "__main__":
-    J_hat = np.eye(3)
-    A_hat = np.eye(3)
-    K_rw = np.ones(3)
-    K_mag = np.ones(3)
-
-    F, f_lin = build_reduced_system_dynamics(J_hat, A_hat, K_rw, K_mag)
-    print(F)
-
-    print(f_lin)
-    
+    return F, A_func, B_func
