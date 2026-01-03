@@ -9,7 +9,7 @@ class ReactionWheel:
         inertia: float,
         axis: np.ndarray,
         max_current: float = 1.0,
-        tau_current: float = 0.1,
+        T_current: float = 0.1,
         torque_constant: float | None = None,
     ) -> None:
         # to float (scalars)
@@ -26,7 +26,7 @@ class ReactionWheel:
 
         # simple current model (first-order)
         self.max_current = float(max_current)
-        self.tau_current = float(tau_current)
+        self.T_current = float(T_current)
 
         # torque constant K_t
         if torque_constant is None:
@@ -40,13 +40,12 @@ class ReactionWheel:
 
     def to_dict(self):
         data = {"max_torque": self.max_torque,
-            "max_rpm": self.max_rpm,
-            "inertia": self.inertia,
-            "max_current": self.max_current,
-            "tau_current": self.tau_current,
-            "torque_constant": self.K_t,
-            "axis": self.axis.tolist()
-            }
+                "max_rpm": self.max_rpm,
+                "inertia": self.inertia,
+                "max_current": self.max_current,
+                "T_current": self.T_current,
+                "axis": self.axis.tolist()
+                }
         return data
 
     # algebraic way of calculating the moment vector affecting the RW
@@ -70,30 +69,34 @@ class ReactionWheel:
         omega_parallel_body = float(np.dot(self.axis, omega_body))
         h_wheel = self.inertia * (float(omega_w) + omega_parallel_body) * self.axis
 
-        return tau_rw, h_wheel
-    
-    # differential equations for wheel speed and current
-    def dynamics(
-        self,
-        u: float,
-        omega_dot_body: np.ndarray,
-        i: float,
-    ) -> tuple[float, float]:
+        if omega_w >= self.max_omega or omega_w <= -self.max_omega:
+            tau_rw = np.zeros(3)
 
-        # making sure it's 3-sized 1D vector
-        omega_dot_body = np.asarray(omega_dot_body, dtype=float).reshape(3)
-        # commanded current (saturated)
+        return tau_rw, h_wheel
+
+    def dynamics(self, u: float, omega_dot_body: np.ndarray, i: float, omega_w: float) -> tuple[float, float]:
+
+        omega_dot_body = np.asarray(omega_dot_body)
+
         i_cmd = float(np.clip(u, -self.max_current, self.max_current))
-        # simple first-order electrical response:
-        di_dt = (i_cmd - float(i)) / self.tau_current
-        # using (saturated) current for torque generation
+
         i_eff = float(np.clip(i, -self.max_current, self.max_current))
         tau_m = self.K_t * i_eff
         tau_m = float(np.clip(tau_m, -self.max_torque, self.max_torque))
 
-        # mechanical dynamics (no friction)
-        # => dot{Omega} = tau_m / J_w - s^T dot{omega}_B
         domega_w = tau_m / self.inertia - float(np.dot(self.axis, omega_dot_body))
+
+        if omega_w >= self.max_omega:
+            domega_w = min(domega_w, 0.0)
+        elif omega_w <= -self.max_omega:
+            domega_w = max(domega_w, 0.0)
+
+        di_dt = (i_cmd - i) / self.T_current
+
+        if i > self.max_current:
+            di_dt = min(di_dt, 0.0)
+        elif i < -self.max_current:
+            di_dt = max(di_dt, 0.0)
 
         return domega_w, di_dt
 
@@ -104,7 +107,7 @@ class Magnetorquer:
         max_moment: float,
         axis: np.ndarray,
         max_current: float = 1.0,
-        tau_current: float = 0.01,
+        T_current: float = 0.1,
     ) -> None:
         self.max_moment = float(max_moment)
         # making sure it's 3-sized 1D vector
@@ -115,26 +118,25 @@ class Magnetorquer:
         self.axis = axis / norm
 
         self.max_current = float(max_current)
-        self.tau_current = float(tau_current)
-        self.K_t = self.max_moment/ self.max_current
+        self.T_current = float(T_current)
+        self.K_t = self.max_moment / self.max_current
 
     def to_dict(self):
         data = {"max_moment": self.max_moment,
-            "max_current": self.max_current,
-            "tau_current": self.tau_current,
-            "torque_constant": self.K_t,
-            "axis": self.axis.tolist()
-            }
+                "axis": self.axis.tolist(),
+                "max_current": self.max_current,
+                "T_current": self.T_current
+                }
         return data
 
-
     # magnetic torque calculations
+
     def torque(self, i: float, B_body: np.ndarray) -> np.ndarray:
         # making sure it's 3-sized 1D vector
         B_body = np.asarray(B_body, dtype=float).reshape(3)
         # saturate current and corresponding dipole magnitude
         i_sat = float(np.clip(i, -self.max_current, self.max_current))
-        m_scalar = self.K_t * i_sat 
+        m_scalar = self.K_t * i_sat
         # dipole along axis
         m_vec = m_scalar * self.axis
         # torque tau = m × B
@@ -144,26 +146,32 @@ class Magnetorquer:
     # differential equations for magnetorquers
     def dynamics(self, u: float, i: float) -> float:
         i_cmd = float(np.clip(u, -self.max_current, self.max_current))
-        di_dt = (i_cmd - float(i)) / self.tau_current
+        
+        di_dt = (i_cmd - i) / self.T_current
+
+        if i > self.max_current:
+            di_dt = min(di_dt, 0.0)
+        elif i < -self.max_current:
+            di_dt = max(di_dt, 0.0)
+
         return di_dt
-    
 
 
-def to_current_commands(u: np.ndarray, B: np.ndarray, mag: list[Magnetorquer], rws: list[ReactionWheel]) -> np.ndarray:
+def to_current_commands(u: np.ndarray, B: np.ndarray, mtqs: list[Magnetorquer], rws: list[ReactionWheel]) -> np.ndarray:
     """
-    
-    """
-    u_mag = u[:len(mag)]
-    u_rw = u[len(mag):]
 
-    Alpha = np.array([rw.K_t* rw.axis for rw in rws]).T
-    rw_i_cmd = np.linalg.solve(Alpha, u_rw)
+    """
+    u_mag = u[:len(mtqs)]
+    u_rw = u[len(mtqs):]
+
+    Alpha = np.array([rw.K_t * rw.axis for rw in rws]).T
+    rw_i_cmd = np.linalg.solve(Alpha, -u_rw)
 
     B_norm = np.linalg.norm(B)
     b = B/B_norm
     m_cmd = np.cross(u_mag, b)/B_norm
 
-    Alpha = np.array([mag.K_t *mag.axis for mag in mag]).T
+    Alpha = np.array([m.K_t * m.axis for m in mtqs]).T
 
     mag_i_cmd = np.linalg.solve(Alpha, m_cmd)
 

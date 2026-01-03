@@ -69,13 +69,13 @@ class Controller(ABC):
 
         R_BO = orc_to_sbc(state_est[:4], r_eci, v_eci) 
 
-        q_err_full = R_BO.as_quat(scalar_first=False) # TODO: do we have to check if q_w is positive?
+        q_err_full = R_BO.as_quat(scalar_first=False)
 
         omega_0 = np.linalg.norm(v_eci)/ np.linalg.norm(r_eci)
         omega_err =  state_est[4:7] - R_BO.apply([0, -omega_0, 0])
         h_w = state_est[7:]
 
-        return np.concatenate((q_err_full[:3], omega_err, h_w)) 
+        return np.concatenate((np.sign(q_err_full[3]) * q_err_full[:3], omega_err, h_w)) 
     
     @abstractmethod
     def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray) -> np.ndarray:
@@ -199,10 +199,10 @@ class PI(Controller):
             Control input vector.
         """
 
-        D_x = self.calc_nadir_state_error(att_state, orbit_state) - self.x_star
-        q_err = D_x[:3]
-        omega_err = D_x[3:6]
-        h_w = D_x[6:]
+        state_err = self.calc_nadir_state_error(att_state, orbit_state)
+        q_err = state_err[:3]
+        omega_err = state_err[3:6]
+        h_w = state_err[6:]
 
 
         self.q_err_int += q_err * self.dt
@@ -355,6 +355,7 @@ class AvanziniLinear(ClassicalQuatFeedback):
         
         k_m = 2 * omega_0 * (1 + np.sin(orbit_model.satrec.inclo)) 
 
+        print(f"k_p: {k_p}, k_d: {k_d}, k_m: {k_m}, k_i: {k_i}")
         super().__init__(k_p, k_d, k_i, k_m, dt, m)
 
     def to_dict(self) -> dict:

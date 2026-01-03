@@ -183,7 +183,7 @@ def rotational_dynamics(omega: ca.SX, u_rw: ca.SX, u_mag: ca.SX, h_w: ca.SX, B_B
         Angular acceleration (3x1).
     """
     # TODO: maybe implement build_rw and build_mag functions to deal with saturation and so on
-    tau_rw = -u_rw 
+    tau_rw = -u_rw  # TODO: double check signs and so on
 
     b = B_B/ca.norm_2(B_B)
 

@@ -84,12 +84,12 @@ class Spacecraft:
         rws = []
         if "Actuators" in data and "ReactionWheels" in data["Actuators"]:
             for rw in data["Actuators"]["ReactionWheels"]:
-                rws.append(ReactionWheel(rw["max_torque"], rw["max_rpm"], rw["inertia"], np.array(rw["axis"]), rw.get("max_current", 1.0), rw.get("tau_current", 0.1), rw.get("torque_constant", None)))
+                rws.append(ReactionWheel(**rw))
 
         magnetorquers = []
         if "Actuators" in data and "Magnetorquers" in data["Actuators"]:
             for mtq in data["Actuators"]["Magnetorquers"]:
-                magnetorquers.append(Magnetorquer(mtq["max_dipole"], np.array(mtq["axis"]), mtq.get("max_current", 1.0), mtq.get("tau_current", 0.01)))
+                magnetorquers.append(Magnetorquer(**mtq))
 
         sensors = data.get("Sensors", {})
 

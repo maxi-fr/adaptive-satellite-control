@@ -50,10 +50,6 @@ class Simulation:
 
         self.enable_disturbance_torques = enable_disturbance_torques
         self.enable_disturbance_forces = enable_disturbance_forces
-        # use these two together enable actuators and freeze actuator states
-        self.enable_actuators = False
-        self.freeze_actuator_states = False
-        self.freeze_body_rates = False
 
         if initial_ang_vel_B is not None:
             self.inital_state[10:13] = initial_ang_vel_B
@@ -78,7 +74,7 @@ class Simulation:
                                        ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3',
                                         'i_cmd_mag_1', 'i_cmd_mag_2', 'i_cmd_mag_3', 'i_cmd_rw_1', 'i_cmd_rw_2', 'i_cmd_rw_3'])
             self.env_logger = Logger(os.path.join(self.log_folder, "environment.csv"), 
-                                     ['t', 'rho', 'B_x', 'B_y', 'B_z', 'sun_pos_x', 'sun_pos_y', 'sun_pos_z', 
+                                     ['t', 'rho', 'B_eci_x', 'B_eci_y', 'B_eci_z', 'sun_pos_x', 'sun_pos_y', 'sun_pos_z', 
                                       'in_shadow', 'moon_pos_x', 'moon_pos_y', 'moon_pos_z'])
             self.mea_logger = Logger(os.path.join(self.log_folder, "measurements.csv"),
                                        ['t', 'sun_x', 'sun_y', 'sun_z', 'mag_x', 'mag_y', 'mag_z', 'gps_x', 'gps_y', 'gps_z',
@@ -164,7 +160,6 @@ class Simulation:
             "params": self.controller.to_dict()
             }
         
-
         r_eci = self.inital_state[0:3]
         v_eci = self.inital_state[3:6]
         q_BI = self.inital_state[6:10]
@@ -219,14 +214,15 @@ class Simulation:
                 lat, lon, alt = eci_to_geodedic(r_eci)
 
                 rho: float = self.atmosphere_density(t, lat, lon, alt)  # type: ignore
-                B: np.ndarray = self.magnetic_field(t, lat, lon, alt)  # type: ignore
+                B_eci: np.ndarray = self.magnetic_field(t, lat, lon, alt)  # type: ignore
+                B_body = R_BI.apply(B_eci)
 
                 sun_pos: np.ndarray = self.sun_position(t)  # type: ignore
                 in_shadow = env.is_in_shadow(r_eci, sun_pos)
                 moon_pos: np.ndarray = self.moon_position(t)  # type: ignore
 
                 self.sat.sun_sensor.measure(t, sun_pos)
-                self.sat.magnetometer.measure(t, B)
+                self.sat.magnetometer.measure(t, B_body)
                 self.sat.gps.measure(t, r_eci)
                 self.sat.gyro.measure(t, omega)
                 for i, rw in enumerate(self.sat.rw_speed_sensors):
@@ -261,15 +257,15 @@ class Simulation:
                     omega_parallel_body = float(np.dot(rw.axis, omega_est)) 
                     h_w += rw.inertia * (omega_rw_est[i] + omega_parallel_body) * rw.axis
 
-                state_est = np.concatenate((q_BI, omega, h_w)) # 
+                state_est = np.concatenate((q_BI, omega, h_w)) 
 
                 u = self.controller.calc_input_cmds(state_est, np.concatenate((r_eci_est, v_eci_est)))
-                current_cmds = to_current_commands(u, B, self.sat.mag, self.sat.rws)
+                current_cmds = to_current_commands(u, B_body, self.sat.mag, self.sat.rws)
 
                 if self.enable_log:
                     self.state_logger.log([t] + list(state))
                     self.input_logger.log([t] + list(u) + list(current_cmds))
-                    self.env_logger.log([t, rho] + list(B) + list(sun_pos) + [in_shadow] + list(moon_pos))
+                    self.env_logger.log([t, rho] + list(B_eci) + list(sun_pos) + [in_shadow] + list(moon_pos))
                     self.mea_logger.log([t] + list(sun_mea) + list(mag_mea) + list(gps_mea) + list(gyro_mea) + list(omega_rw_mea))
                     self.est_logger.log([t] + list(r_eci_est) + list(v_eci_est) + list(state_est) + 
                                         list(omega_rw_est) + list(mag_curr_est) + list(curr_rw_est))
@@ -284,7 +280,7 @@ class Simulation:
 
                 if self.enable_viz and int((t - self.t0).total_seconds()) % 3 == 0:
                     self.viz.update(self.sat.surfaces, R_BO, R_OI, R_OI.apply(v_eci))
-                pbar.update(self.dt.total_seconds() / 60)
+                pbar.update(round(self.dt.total_seconds() / 60, 2))
 
     def world_dynamics(self, x: np.ndarray, u: np.ndarray, t: datetime.datetime):
         """
@@ -295,7 +291,7 @@ class Simulation:
         x : np.ndarray, shape (22,)
             All variable states during integration
         u : np.ndarray, shape (6,)
-            All control inputs during integration. They are constant during integration.
+            All actuator commands during integration. They are constant during integration.
         t : datetime.datetime
             Current simulation time.
         update_sensors : bool = False
@@ -324,7 +320,8 @@ class Simulation:
         lat, lon, alt = eci_to_geodedic(r_eci)
 
         rho: float = self.atmosphere_density(t, lat, lon, alt)  # type: ignore
-        B: np.ndarray = self.magnetic_field(t, lat, lon, alt)  # type: ignore
+        B_eci: np.ndarray = self.magnetic_field(t, lat, lon, alt)  # type: ignore
+        B_body = R_BI.apply(B_eci)
 
         sun_pos: np.ndarray = self.sun_position(t)  # type: ignore
         in_shadow = env.is_in_shadow(r_eci, sun_pos)
@@ -347,30 +344,18 @@ class Simulation:
             F_aero = np.zeros(3)
             F_SRP = np.zeros(3)
 
-        if self.enable_actuators:
-            tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega))
-                               for i, rw in enumerate(self.sat.rws)])  # type: ignore
-            tau_mag = sum([np.array(mag.torque(mag_curr[i], B)) for i, mag in enumerate(self.sat.mag)])
-        else:
-            tau_rw = np.zeros(3)
-            h_rw = np.zeros(3)
-            tau_mag = np.zeros(3)
+        tau_rw, h_rw = sum([np.array(rw.torque_ang_momentum(rws_curr[i], omega_rws[i], omega))
+                            for i, rw in enumerate(self.sat.rws)])  # type: ignore
+        tau_mag = sum([np.array(mag.torque(mag_curr[i], B_body)) for i, mag in enumerate(self.sat.mag)])
 
         # differential equations
         d_r = v_eci
         d_v = self.sat.orbit_dynamics(r_eci, R_BI.inv().apply(F_aero + F_SRP) + F_third + F_grav)
         d_q = quaternion_kinematics(q_BI, omega)
         d_omega = self.sat.attitude_dynamics(omega, h_rw, tau_mag - tau_rw, tau_gg + tau_aero + tau_SRP)
-        if self.freeze_body_rates is True:
-            d_omega = np.zeros(3)
 
         d_curr_mag = np.array([mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)])
-        d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i]) for i, rw in enumerate(self.sat.rws)]).T
-
-        if self.freeze_actuator_states is True:
-            d_omega_rw = np.zeros(3)
-            d_curr_mag = np.zeros(3)
-            d_curr_rw = np.zeros(3)
+        d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i], omega_rws[i]) for i, rw in enumerate(self.sat.rws)]).T
 
         dx = np.concatenate((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_mag, d_curr_rw))
 
@@ -403,26 +388,12 @@ def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray
 
     dt_float = dt.total_seconds()
 
-    try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings('error', category=Warning)
-            k1 = f(x, u, t)
-            k2 = f(x + 0.5 * dt_float * k1, u, t + 0.5 * dt)
-            k3 = f(x + 0.5 * dt_float * k2, u, t + 0.5 * dt)
-            k4 = f(x + dt_float * k3, u, t + dt)
+    k1 = f(x, u, t)
+    k2 = f(x + 0.5 * dt_float * k1, u, t + 0.5 * dt)
+    k3 = f(x + 0.5 * dt_float * k2, u, t + 0.5 * dt)
+    k4 = f(x + dt_float * k3, u, t + dt)
 
-            x_next = x + (dt_float / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-
-    except Warning as e:
-        print(f"RuntimeWarning caught in rk4_step: {e}")
-        print(f"t: {t}, dt: {dt_float}")
-        print(f"x: {x}")
-        print(f"u: {u}")
-        if 'k1' in locals(): print(f"k1: {k1}")
-        if 'k2' in locals(): print(f"k2: {k2}")
-        if 'k3' in locals(): print(f"k3: {k3}")
-        if 'k4' in locals(): print(f"k4: {k4}")
-        raise e
+    x_next = x + (dt_float / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
     
     return x_next
 
