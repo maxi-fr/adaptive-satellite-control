@@ -39,8 +39,14 @@ class ReactionWheel:
         self.max_omega = 2.0 * np.pi * self.max_rpm / 60.0
 
     def to_dict(self):
-        data = self.__dict__
-        data["axis"] = self.axis.tolist()
+        data = {"max_torque": self.max_torque,
+            "max_rpm": self.max_rpm,
+            "inertia": self.inertia,
+            "max_current": self.max_current,
+            "tau_current": self.tau_current,
+            "torque_constant": self.K_t,
+            "axis": self.axis.tolist()
+            }
         return data
 
     # algebraic way of calculating the moment vector affecting the RW
@@ -65,7 +71,7 @@ class ReactionWheel:
         h_wheel = self.inertia * (float(omega_w) + omega_parallel_body) * self.axis
 
         return tau_rw, h_wheel
-
+    
     # differential equations for wheel speed and current
     def dynamics(
         self,
@@ -113,8 +119,12 @@ class Magnetorquer:
         self.K_t = self.max_moment/ self.max_current
 
     def to_dict(self):
-        data = self.__dict__
-        data["axis"] = self.axis.tolist()
+        data = {"max_moment": self.max_moment,
+            "max_current": self.max_current,
+            "tau_current": self.tau_current,
+            "torque_constant": self.K_t,
+            "axis": self.axis.tolist()
+            }
         return data
 
 
@@ -143,8 +153,8 @@ def to_current_commands(u: np.ndarray, B: np.ndarray, mag: list[Magnetorquer], r
     """
     
     """
-    u_rw = u[:len(rws)]
-    u_mag = u[len(rws):]
+    u_mag = u[:len(mag)]
+    u_rw = u[len(mag):]
 
     Alpha = np.array([rw.K_t* rw.axis for rw in rws]).T
     rw_i_cmd = np.linalg.solve(Alpha, u_rw)
@@ -157,4 +167,4 @@ def to_current_commands(u: np.ndarray, B: np.ndarray, mag: list[Magnetorquer], r
 
     mag_i_cmd = np.linalg.solve(Alpha, m_cmd)
 
-    return np.concatenate((rw_i_cmd, mag_i_cmd))
+    return np.concatenate((mag_i_cmd, rw_i_cmd))

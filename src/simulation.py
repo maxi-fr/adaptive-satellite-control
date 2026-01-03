@@ -3,6 +3,7 @@ import json
 import os
 from typing import Callable
 from scipy.spatial.transform import Rotation as R
+import warnings
 import numpy as np
 
 from actuators import to_current_commands
@@ -51,7 +52,7 @@ class Simulation:
         self.enable_disturbance_forces = enable_disturbance_forces
         # use these two together enable actuators and freeze actuator states
         self.enable_actuators = False
-        self.freeze_actuator_states = True
+        self.freeze_actuator_states = False
         self.freeze_body_rates = False
 
         if initial_ang_vel_B is not None:
@@ -71,10 +72,24 @@ class Simulation:
             self.state_logger = Logger(os.path.join(self.log_folder, "state.csv"),
                                        ['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
                                         'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
-                                        'omega_rw_1', 'omega_rw_2', 'omega_rw_3',
-                                        'i_rw_1', 'i_rw_2', 'i_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3'])
+                                        'omega_rw_1', 'omega_rw_2', 'omega_rw_3', 'i_mag_1', 'i_mag_2', 'i_mag_3',
+                                        'i_rw_1', 'i_rw_2', 'i_rw_3'])
             self.input_logger = Logger(os.path.join(self.log_folder, "input.csv"),
-                                       ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3'])
+                                       ['t', 'u_mag_1', 'u_mag_2', 'u_mag_3', 'u_rw_1', 'u_rw_2', 'u_rw_3',
+                                        'i_cmd_mag_1', 'i_cmd_mag_2', 'i_cmd_mag_3', 'i_cmd_rw_1', 'i_cmd_rw_2', 'i_cmd_rw_3'])
+            self.env_logger = Logger(os.path.join(self.log_folder, "environment.csv"), 
+                                     ['t', 'rho', 'B_x', 'B_y', 'B_z', 'sun_pos_x', 'sun_pos_y', 'sun_pos_z', 
+                                      'in_shadow', 'moon_pos_x', 'moon_pos_y', 'moon_pos_z'])
+            self.mea_logger = Logger(os.path.join(self.log_folder, "measurements.csv"),
+                                       ['t', 'sun_x', 'sun_y', 'sun_z', 'mag_x', 'mag_y', 'mag_z', 'gps_x', 'gps_y', 'gps_z',
+                                        'gyro_x', 'gyro_y', 'gyro_z', 'omega_rw_1', 'omega_rw_2', 'omega_rw_3'])
+            self.est_logger = Logger(os.path.join(self.log_folder, "estimation.csv"),
+                                       ['t', 'r_eci_x', 'r_eci_y', 'r_eci_z', 'v_eci_x', 'v_eci_y', 'v_eci_z',
+                                        'q_BI_x', 'q_BI_y', 'q_BI_z', 'q_BI_w', 'omega_x', 'omega_y', 'omega_z',
+                                        'h_rw_x', 'h_rw_y', 'h_rw_z',
+                                        'omega_rw_1', 'omega_rw_2', 'omega_rw_3',
+                                        'i_mag_1', 'i_mag_2', 'i_mag_3', 'i_rw_1', 'i_rw_2', 'i_rw_3'])
+
 
         self.att_ekf = AttitudeEKF(q0=self.inital_state[6:10], b0=self.inital_state[10:13], P0=np.eye(6), Qc=np.eye(6),
                                    R_sun=np.eye(3), R_mag=np.eye(3))
@@ -96,7 +111,7 @@ class Simulation:
         with open(file_path, "r") as f:
             data = json.load(f)
 
-        controller = eval("controllers." + data["Controller"].name)(**data["Controller"].params)
+        controller = eval("controllers." + data["Controller"]["name"])(**data["Controller"]["params"])
 
         data_sim = data["Simulation"]
         t0 = datetime.datetime.fromisoformat(data_sim["Start"])
@@ -109,8 +124,8 @@ class Simulation:
 
         tf = t0 + dur
 
-        enable_disturbance_torques = data.get("DisturbanceTorques", True)
-        enable_disturbance_forces = data.get("DisturbanceForces", True)
+        enable_disturbance_torques = data_sim.get("DisturbanceTorques", True)
+        enable_disturbance_forces = data_sim.get("DisturbanceForces", True)
 
         data_init_state = data["InitialState"]
 
@@ -130,7 +145,7 @@ class Simulation:
         orbit_ang_vel = np.linalg.norm(v_ECI)/np.linalg.norm(r_ECI)
         init_ang_vel_B_BI = ang_vel_B_BO + R_BO.apply(np.array((0, -orbit_ang_vel, 0)))
 
-        return cls(Spacecraft.from_dict(data["SpacecraftParams"]), controller, (tle1, tle2), R_BO, #TODO: add controller
+        return cls(Spacecraft.from_dict(data["SpacecraftParams"]), controller, (tle1, tle2), R_BO,
                    init_ang_vel_B_BI, dt, t0, tf, enable_viz, enable_log, enable_disturbance_torques, enable_disturbance_forces)
 
     def to_json(self, file_path: str):
@@ -194,8 +209,8 @@ class Simulation:
                 q_BI = state[6:10]
                 omega = state[10:13]
                 omega_rws = state[13:16]
-                rws_curr = state[16:19]
-                mag_curr = state[19:22]
+                mag_curr = state[16:19]
+                rws_curr = state[19:22]
 
                 R_BO = orc_to_sbc(q_BI, r_eci, v_eci)
                 R_OI = orc_to_eci(r_eci, v_eci).inv()
@@ -236,15 +251,29 @@ class Simulation:
                 if new_mag_mea:
                     self.att_ekf.update_mag(t, mag_mea, r_eci_est)
 
-                state_est = state # self.att_ekf.get_state()
+                omega_est = omega # TODO: get estimators working!!
+                omega_rw_est = omega_rw_mea
+                curr_rw_est = rws_curr
+                mag_curr_est = mag_curr
 
-                u = self.controller.calc_input_cmds(state_est, self.dt.total_seconds())
+                h_w = np.zeros(3)
+                for i, rw in enumerate(self.sat.rws):
+                    omega_parallel_body = float(np.dot(rw.axis, omega_est)) 
+                    h_w += rw.inertia * (omega_rw_est[i] + omega_parallel_body) * rw.axis
+
+                state_est = np.concatenate((q_BI, omega, h_w)) # 
+
+                u = self.controller.calc_input_cmds(state_est, np.concatenate((r_eci_est, v_eci_est)))
                 current_cmds = to_current_commands(u, B, self.sat.mag, self.sat.rws)
-
 
                 if self.enable_log:
                     self.state_logger.log([t] + list(state))
-                    self.input_logger.log([t] + list(u))
+                    self.input_logger.log([t] + list(u) + list(current_cmds))
+                    self.env_logger.log([t, rho] + list(B) + list(sun_pos) + [in_shadow] + list(moon_pos))
+                    self.mea_logger.log([t] + list(sun_mea) + list(mag_mea) + list(gps_mea) + list(gyro_mea) + list(omega_rw_mea))
+                    self.est_logger.log([t] + list(r_eci_est) + list(v_eci_est) + list(state_est) + 
+                                        list(omega_rw_est) + list(mag_curr_est) + list(curr_rw_est))
+
 
                 next_state = rk4_step(self.world_dynamics, state, current_cmds, t, self.dt)
 
@@ -283,8 +312,8 @@ class Simulation:
         q_BI = x[6:10]
         omega = x[10:13]
         omega_rws = x[13:16]
-        rws_curr = x[16:19]
-        mag_curr = x[19:22]
+        mag_curr = x[16:19]
+        rws_curr = x[19:22]
 
         u_mag = u[:3]
         u_rw = u[3:6]
@@ -329,20 +358,21 @@ class Simulation:
 
         # differential equations
         d_r = v_eci
-        d_v = self.sat.orbit_dynamics(r_eci, np.zeros(3), F_aero + F_SRP + F_third + F_grav)
+        d_v = self.sat.orbit_dynamics(r_eci, R_BI.inv().apply(F_aero + F_SRP) + F_third + F_grav)
         d_q = quaternion_kinematics(q_BI, omega)
         d_omega = self.sat.attitude_dynamics(omega, h_rw, tau_mag - tau_rw, tau_gg + tau_aero + tau_SRP)
         if self.freeze_body_rates is True:
             d_omega = np.zeros(3)
-        d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i]) for i, rw in enumerate(self.sat.rws)]).T
+
         d_curr_mag = np.array([mag.dynamics(u_mag[i], mag_curr[i]) for i, mag in enumerate(self.sat.mag)])
+        d_omega_rw, d_curr_rw = np.array([rw.dynamics(u_rw[i], d_omega, rws_curr[i]) for i, rw in enumerate(self.sat.rws)]).T
 
         if self.freeze_actuator_states is True:
             d_omega_rw = np.zeros(3)
-            d_curr_rw = np.zeros(3)
             d_curr_mag = np.zeros(3)
+            d_curr_rw = np.zeros(3)
 
-        dx = np.concatenate((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_rw, d_curr_mag))
+        dx = np.concatenate((d_r, d_v, d_q, d_omega, d_omega_rw, d_curr_mag, d_curr_rw))
 
         return dx
 
@@ -373,20 +403,32 @@ def rk4_step(f: Callable[[np.ndarray, np.ndarray, datetime.datetime], np.ndarray
 
     dt_float = dt.total_seconds()
 
-    k1 = f(x, u, t)
-    k2 = f(x + 0.5 * dt_float * k1, u, t + 0.5 * dt)
-    k3 = f(x + 0.5 * dt_float * k2, u, t + 0.5 * dt)
-    k4 = f(x + dt_float * k3, u, t + dt)
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings('error', category=Warning)
+            k1 = f(x, u, t)
+            k2 = f(x + 0.5 * dt_float * k1, u, t + 0.5 * dt)
+            k3 = f(x + 0.5 * dt_float * k2, u, t + 0.5 * dt)
+            k4 = f(x + dt_float * k3, u, t + dt)
 
-    return x + (dt_float / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+            x_next = x + (dt_float / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+    except Warning as e:
+        print(f"RuntimeWarning caught in rk4_step: {e}")
+        print(f"t: {t}, dt: {dt_float}")
+        print(f"x: {x}")
+        print(f"u: {u}")
+        if 'k1' in locals(): print(f"k1: {k1}")
+        if 'k2' in locals(): print(f"k2: {k2}")
+        if 'k3' in locals(): print(f"k3: {k3}")
+        if 'k4' in locals(): print(f"k4: {k4}")
+        raise e
+    
+    return x_next
 
 
 if __name__ == "__main__":
     file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "src", "simulation_config.json")
 
     sim = Simulation.from_json(file_path, enable_viz=False, enable_log=True)
-
-    sim.tf = sim.t0 + datetime.timedelta(hours=10)
-    sim.dt = datetime.timedelta(seconds=0.2)
-
     sim.run()

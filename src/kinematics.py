@@ -14,9 +14,9 @@ def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
 
     Parameters
     ----------
-    r : np.ndarray, shape (3,)
+    r : np.ndarray, shape (3,) or (N, 3)
         Position vector in the ECI frame.
-    v : np.ndarray, shape (3,)
+    v : np.ndarray, shape (3,) or (N, 3)
         Velocity vector in the ECI frame.
 
     Returns
@@ -25,11 +25,14 @@ def orc_to_eci(r: np.ndarray, v: np.ndarray) -> R:
         Rotation object representing the transformation from ORC to ECI.
 
     """
-    o_3I = (- r / np.linalg.norm(r))
-    o_2I = (np.cross(v, -o_3I) / np.linalg.norm(v))
+    o_3I = -r / np.linalg.norm(r, axis=-1, keepdims=True)
+    
+    cross_v_z = np.cross(v, -o_3I)
+    o_2I = cross_v_z / np.linalg.norm(cross_v_z, axis=-1, keepdims=True)
+    
     o_1I = np.cross(o_2I, o_3I)
     
-    R_IO = R.from_matrix(np.vstack([o_1I, o_2I, o_3I]).T)
+    R_IO = R.from_matrix(np.stack([o_1I, o_2I, o_3I], axis=-1))
     return R_IO
 
 def euler_ocr_to_sbc(roll_deg: float, pitch_deg: float, yaw_deg: float) -> R:
@@ -83,6 +86,37 @@ def orc_to_sbc(q_BI: np.ndarray, r_eci: np.ndarray, v_eci: np.ndarray) -> R:
     R_BO = eci_to_sbc(q_BI) * orc_to_eci(r_eci, v_eci)
 
     return R_BO
+
+def to_euler(q_BI: np.ndarray, r_eci: np.ndarray, v_eci: np.ndarray) -> np.ndarray:
+    """
+    Calculates the Euler angles (Roll, Pitch, Yaw) from the attitude quaternion and orbital state.
+
+    The Euler angles represent the rotation from the Orbital Reference Frame (ORC) to the
+    Satellite Body Frame (SBC). The intrinsic rotation sequence is Y-X-Z (Pitch-Roll-Yaw).
+
+    Parameters
+    ----------
+    q_BI : np.ndarray, shape (4,)
+        Attitude quaternion [qx, qy, qz, qw] for the rotation from ECI (I) to the body frame (B).
+    r_eci : np.ndarray, shape (3,)
+        Position vector in the ECI frame.
+    v_eci : np.ndarray, shape (3,)
+        Velocity vector in the ECI frame.
+
+    Returns
+    -------
+    np.ndarray, shape (3,)
+        Euler angles [Roll, Pitch, Yaw] in degrees.
+        
+    """
+
+    R_BO = orc_to_sbc(q_BI, r_eci, v_eci)
+    euler = np.atleast_2d(R_BO.as_euler('YXZ', degrees=True))
+
+    euler[:, [0, 1]] = euler[:, [1, 0]]
+    return euler.squeeze()
+
+
 
 
 def eci_to_sbc(q_BI: np.ndarray) -> R:

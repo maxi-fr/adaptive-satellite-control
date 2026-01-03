@@ -148,7 +148,7 @@ class Spacecraft:
         
         return data
 
-    def orbit_dynamics(self, r_eci: np.ndarray, ctrl_force: np.ndarray, dist_force: np.ndarray):
+    def orbit_dynamics(self, r_eci: np.ndarray, ext_force: np.ndarray):
         """
         Computes the orbital dynamics (acceleration) of the spacecraft.
 
@@ -156,17 +156,15 @@ class Spacecraft:
         ----------
         r_eci : np.ndarray
             Position vector in the ECI frame [m].
-        ctrl_force : np.ndarray
-            Control force vector in the ECI frame [N].
-        dist_force : np.ndarray
-            Disturbance force vector in the ECI frame [N].
+        ext_force : np.ndarray
+            External force vector in the ECI frame [N].
 
         Returns
         -------
         np.ndarray
             Acceleration vector in the ECI frame [m/s^2].
         """
-        return orbit_dynamics(self.m, r_eci, ctrl_force, dist_force)
+        return orbit_dynamics(self.m, r_eci, ext_force)
 
     def attitude_dynamics(self, omega: np.ndarray, h_int: np.ndarray, ctrl_torque: np.ndarray, dist_torque: np.ndarray):
         """

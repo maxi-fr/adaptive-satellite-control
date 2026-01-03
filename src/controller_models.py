@@ -222,8 +222,8 @@ def satellite_dynamics(x: ca.SX, u: ca.SX, B_eci: ca.SX, J_hat: np.ndarray) -> c
     omega = x[4:7]
     h_w = x[7:10]
 
-    u_rw = u[:3]
-    u_mag = u[3:]
+    u_mag = u[:3]
+    u_rw = u[3:]
 
     d_q_BI = kinematics(q_BI, omega)
 
@@ -257,7 +257,7 @@ def build_system_dynamics(J_hat: np.ndarray) -> ca.Function:
 
     u_rw = ca.SX.sym('u_rw', 3) #type: ignore
     u_mag = ca.SX.sym('u_mag', 3) #type: ignore
-    u = ca.vertcat(u_rw, u_mag)
+    u = ca.vertcat(u_mag, u_rw)
 
     B_eci = ca.SX.sym('B_eci', 3) #type: ignore
 
@@ -296,7 +296,7 @@ def build_reduced_system_dynamics(dt: float, J_hat: np.ndarray) -> Tuple[ca.Func
 
     u_rw = ca.SX.sym('u_rw', 3) #type: ignore
     u_mag = ca.SX.sym('u_mag', 3) #type: ignore
-    u = ca.vertcat(u_rw, u_mag)
+    u = ca.vertcat(u_mag, u_rw)
 
     B_eci = ca.SX.sym('B_eci', 3) #type: ignore
     
@@ -364,8 +364,8 @@ def error_dynamics(x: ca.SX, u: ca.SX, B_orc: ca.SX, omega_c: np.ndarray, J_hat:
     omega_err = x[4:7]
     h_w = x[7:10]
 
-    u_rw = u[:3]
-    u_mag = u[3:]
+    u_mag = u[:3]
+    u_rw = u[3:]
     
     omega_c_b = quaternion_rotation(q_err, omega_c)
     omega = omega_err + omega_c_b
@@ -413,7 +413,7 @@ def build_reduced_error_dynamics(dt: float, omega_c: np.ndarray, J_hat: np.ndarr
 
     u_rw = ca.SX.sym('u_rw', 3) #type: ignore
     u_mag = ca.SX.sym('u_mag', 3) #type: ignore
-    u = ca.vertcat(u_rw, u_mag)
+    u = ca.vertcat(u_mag, u_rw)
 
     B_orc = ca.SX.sym('B_orc', 3) #type: ignore
     

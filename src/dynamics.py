@@ -13,7 +13,7 @@ G = 6.67430e-11  # universal gravitational constant
 M = 5.972e24  # mass of earth
 MU = G*M  # gravitational parameter
 
-def orbit_dynamics(m: float, r: np.ndarray, ctrl_force: np.ndarray, dist_force: np.ndarray) -> np.ndarray:
+def orbit_dynamics(m: float, r: np.ndarray, ext_force: np.ndarray) -> np.ndarray:
     """
     Compute orbital acceleration of the center of mass of the satellite according to Newtons laws of motion.
 
@@ -23,10 +23,8 @@ def orbit_dynamics(m: float, r: np.ndarray, ctrl_force: np.ndarray, dist_force: 
         Mass of the satellite [kg].
     r : np.ndarray, shape (3,)
         Position vector in the ECI frame [m].
-    ctrl_force : np.ndarray, shape (3,)
-        Control force vector in the ECI frame [N].
-    dist_force : np.ndarray, shape (3,)
-        Disturbance force vector in the ECI frame [N].
+    ext_force : np.ndarray, shape (3,)
+        External force vector in the ECI frame [N].
 
     Returns
     -------
@@ -34,7 +32,7 @@ def orbit_dynamics(m: float, r: np.ndarray, ctrl_force: np.ndarray, dist_force: 
         Acceleration vector (d^2r/dt^2) in the ECI frame [m/s^2].
     """
     r_norm = np.linalg.norm(r)
-    d_v = - (MU/r_norm**3) * r + (ctrl_force + dist_force)/m
+    d_v = - (MU/r_norm**3) * r + ext_force/m
     return d_v
 
 

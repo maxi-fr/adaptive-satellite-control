@@ -104,6 +104,9 @@ class ZeroInputs(Controller):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
 
+    def to_dict(self) -> dict:
+        return {}
+
     def calc_input_cmds(self, att_state: np.ndarray, orbit_state: np.ndarray) -> np.ndarray:
         """
         Calculates the control input commands.
@@ -198,7 +201,7 @@ class PI(Controller):
 
         D_x = self.calc_nadir_state_error(att_state, orbit_state) - self.x_star
         q_err = D_x[:3]
-        omega_err = D_x[3:]
+        omega_err = D_x[3:6]
         h_w = D_x[6:]
 
 
@@ -208,7 +211,7 @@ class PI(Controller):
 
         u = np.clip(u_R, self.u_min, self.u_max)
 
-        self.q_err_int -= self.m * (u_R - u) # anti wind up
+        self.q_err_int -= self.m * (u_R[:3] - u[:3] + u_R[3:6] - u[3:6]) # TODO: check how to do anit wind up correctly for MIMO
 
         return u + self.u_star # TODO: anti wind up needs to consider u_star as well?!
     
@@ -248,15 +251,16 @@ class LQR(PI):
         # Generate a time array for one orbit to average the B-field and operating point
         period = 2 * np.pi / mean_motion
         num_points = 100 # Number of points to sample over one orbit
+        t0 = datetime.datetime.fromisoformat(t0)
+        if t0.tzinfo is None:
+            t0 = t0.replace(tzinfo=datetime.timezone.utc)
         T = [t0 + datetime.timedelta(seconds=i * period / num_points) for i in range(num_points)]
 
         r_ECI, v_ECI = orbit_model.propagate(T)
 
-        omega_c = np.array([0, -np.linalg.norm(v_ECI)/ np.linalg.norm(r_ECI), 0]) # In ORC frame
-        
-        omega_c = v_ECI.mean(axis=0) / np.linalg.norm(r_ECI.mean(axis=0))
+        omega_c = np.array([0, -v_ECI.mean(axis=0) / np.linalg.norm(r_ECI.mean(axis=0)), 0]) # In ORC frame
 
-        u_star = np.concatenate((np.zeros(3), np.cross(omega_c, J_hat @ omega_c)))
+        u_star = np.zeros(6)
 
         _, A_func, B_func= build_reduced_error_dynamics(dt, omega_c, J_hat)
 
@@ -296,7 +300,7 @@ class LQR(PI):
         return data
         
 
-class AvanziniLinear(PI):
+class ClassicalQuatFeedback(PI):
     
     def __init__(self, k_p, k_d, k_i, k_m, dt, m=None):
         """
@@ -306,10 +310,11 @@ class AvanziniLinear(PI):
         u = [u_mag, u_rw]
         
         """
-        K_q = np.eye(3) * k_p
-        K_omega = np.eye(3) * k_d
-        K_wheel = np.eye(3) * k_m
-        K_q_int = np.eye(3) * k_i
+
+        K_q = np.vstack((np.zeros((3, 3)), np.eye(3) * k_p))
+        K_omega = np.vstack((np.zeros((3, 3)), np.eye(3) * k_d))
+        K_wheel = np.vstack((np.eye(3) * k_m, np.zeros((3, 3))))
+        K_q_int = np.vstack((np.zeros((3, 3)), np.eye(3) * k_i))
 
         super().__init__(K_q, K_omega, K_wheel, K_q_int, (np.zeros(9), np.zeros(6)), dt, m) 
 
@@ -323,6 +328,48 @@ class AvanziniLinear(PI):
             "dt": self.dt
         }
         return data
+    
+class AvanziniLinear(ClassicalQuatFeedback):
+    def __init__(self, damping_ratio, h_sat, J, tle1, tle2, t0, k_i, dt, m):
+        self.h_sat = h_sat
+        self.J = J
+        self.tle1 = tle1
+        self.tle2 = tle2
+        self.t0 = t0
+        self.damping_ratio = damping_ratio
+
+        J_max = np.max(np.linalg.eigvals(J))
+        orbit_model = SGP4.from_tle(tle1, tle2)
+        t0 = datetime.datetime.fromisoformat(t0)
+        if t0.tzinfo is None:
+            t0 = t0.replace(tzinfo=datetime.timezone.utc)
+
+        r_ECI, v_ECI = orbit_model.propagate(t0)
+
+        omega_0 = abs(v_ECI.mean(axis=0) / np.linalg.norm(r_ECI.mean(axis=0)))
+
+        k_p = 2 * (h_sat * np.e / np.pi)**2 / J_max
+
+        omega_n = np.sqrt(k_p/(2 * J_max))
+        k_d = max(omega_0 * J_max, 2* J_max * damping_ratio * omega_n)
+        
+        k_m = 2 * omega_0 * (1 + np.sin(orbit_model.satrec.inclo)) 
+
+        super().__init__(k_p, k_d, k_i, k_m, dt, m)
+
+    def to_dict(self) -> dict:
+        data = {"damping_ratio": self.damping_ratio,
+                "h_sat": self.h_sat,
+                 "J": self.J,
+                 "tle1": self.tle1,
+                 "tle2": self.tle2,
+                 "t0": self.t0,
+                 "k_i": self.K_q_int[0, 0],
+                 "m": self.m,
+                 "dt": self.dt
+                }
+        return data
+    
 
 class GainScheduling(Controller):
 

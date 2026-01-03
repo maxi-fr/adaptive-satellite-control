@@ -2,7 +2,9 @@
   "Simulation": {
     "Start": "2024-01-01T12:00:00",
     "Stepsize": "0:00:00.2",
-    "Duration": "0:10:00"
+    "Duration": "2:00:00",
+    "DisturbanceTorques": true,
+    "DisturbanceForces": true
   },
   "InitialState": {
     "TLE": {
@@ -17,8 +19,21 @@
     "AngularVelocity (wrt ORC in SBC) (deg/s)": [0.0, 0.0, 0.0]
   },
   "Controller": {
-    "name": "ZeroInputs",
-    "params": {}
+    "name": "AvanziniLinear",
+    "params": {"damping_ratio": 1,
+               "h_sat": 0.00177185825742,
+               "J": [
+                  [0.012286, -0.000065, -0.000236],
+                  [-0.000065, 0.012726, -0.000039],
+                  [-0.000236, -0.000039, 0.005707]
+                ],               
+               "tle1": "1 25544U 98067A   24001.50000000  .00000000  00000-0  00000-0 2    07",
+               "tle2": "2 25544 097.6000 010.0000 0001000 000.0000 000.0000 15.25000000000009",
+               "t0": "2024-01-01T12:00:00",
+               "k_i": 0,
+               "dt": 0.0,
+               "m": 0
+               }
   },
   "SpacecraftParams": {
     "Mass": 2.304,

@@ -83,7 +83,8 @@ def atmosphere_density_msis(dt_utc: datetime.datetime, lat_deg: float, lon_deg: 
     # datetimes = np.array([dt_utc], dtype="datetime64[s]")
     alt_km = alt_m / 1000.0
 
-    result = pymsis.calculate(dt_utc, lat_deg, lon_deg, alt_km, f107, f107a, ap) #type: ignore
+    result = pymsis.calculate(dt_utc.astimezone(datetime.timezone.utc).replace(tzinfo=None), #type: ignore
+                              lat_deg, lon_deg, alt_km, f107, f107a, ap) 
 
     rho_kg_m3 = result[:, 0].item(0)
 
@@ -113,16 +114,16 @@ def magnetic_field_vector(dt_utc: datetime.datetime, lat_deg: float, lon_deg: fl
     Returns
     -------
     np.ndarray, shape (3,)
-        The magnetic field vector [Bx, By, Bz] in the ECI frame, in nanoTeslas [nT].
+        The magnetic field vector [Bx, By, Bz] in the ECI frame, in Tesla [T].
     """
 
     D, I, H, Bn, Be, Bv, B_tot = pyIGRF.igrf_value(lat_deg, lon_deg, alt_m/1000)
 
     B_ecef = pymap3d.ned2ecef(Bn, Be, Bv, lat_deg, lon_deg, alt_m, pymap3d.Ellipsoid.from_name("wgs84"))
 
-    B_eci = np.asarray(pymap3d.ecef2eci(*B_ecef, time=dt_utc)) #TODO: takes most of the computation time 
+    B_eci = np.asarray(pymap3d.ecef2eci(*B_ecef, time=dt_utc))
 
-    return (B_eci / np.linalg.norm(B_eci)) * B_tot
+    return (B_eci / np.linalg.norm(B_eci)) * B_tot * 1e-9
 
 
 def sun_position(dt_utc: datetime.datetime) -> np.ndarray:
